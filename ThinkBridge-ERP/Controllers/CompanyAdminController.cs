@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using ThinkBridge_ERP.Data;
+using ThinkBridge_ERP.Models.Entities;
 using ThinkBridge_ERP.Services.Interfaces;
 
 namespace ThinkBridge_ERP.Controllers;
@@ -12,6 +13,9 @@ namespace ThinkBridge_ERP.Controllers;
 [Authorize(Policy = "CompanyAdminOnly")]
 public class CompanyAdminController : ControllerBase
 {
+    private const string LogTypeSystem = "System";
+    private const string LogTypeSecurity = "Security";
+
     private readonly IUserManagementService _userService;
     private readonly ILogger<CompanyAdminController> _logger;
     private readonly ApplicationDbContext _context;
@@ -175,6 +179,7 @@ public class CompanyAdminController : ControllerBase
             Action = $"Created user '{request.FirstName} {request.LastName}' as {request.Role}",
             EntityName = "User",
             EntityID = result.UserId ?? 0,
+            LogType = LogTypeSystem,
             CreatedAt = DateTime.UtcNow
         });
         await _context.SaveChangesAsync();
@@ -218,6 +223,7 @@ public class CompanyAdminController : ControllerBase
             Action = $"Updated user '{request.FirstName} {request.LastName}'",
             EntityName = "User",
             EntityID = id,
+            LogType = LogTypeSystem,
             CreatedAt = DateTime.UtcNow
         });
         await _context.SaveChangesAsync();
@@ -256,6 +262,7 @@ public class CompanyAdminController : ControllerBase
             Action = $"{(request.Status == "Active" ? "Activated" : "Deactivated")} user account",
             EntityName = "User",
             EntityID = id,
+            LogType = LogTypeSystem,
             CreatedAt = DateTime.UtcNow
         });
         await _context.SaveChangesAsync();
@@ -289,6 +296,7 @@ public class CompanyAdminController : ControllerBase
             Action = "Reset user password",
             EntityName = "User",
             EntityID = id,
+            LogType = LogTypeSecurity,
             CreatedAt = DateTime.UtcNow
         });
         await _context.SaveChangesAsync();
@@ -332,12 +340,54 @@ public class CompanyAdminController : ControllerBase
         [FromQuery] string? action = null,
         [FromQuery] string? entity = null,
         [FromQuery] string? dateRange = null,
+        [FromQuery] string? logType = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 15)
+    {
+        return await GetAuditLogsInternal(search, action, entity, dateRange, page, pageSize, logType);
+    }
+
+    [HttpGet("auditlogs/system")]
+    public async Task<IActionResult> GetSystemAuditLogs(
+        [FromQuery] string? search = null,
+        [FromQuery] string? action = null,
+        [FromQuery] string? entity = null,
+        [FromQuery] string? dateRange = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 15)
+    {
+        return await GetAuditLogsInternal(search, action, entity, dateRange, page, pageSize, LogTypeSystem);
+    }
+
+    [HttpGet("auditlogs/security")]
+    public async Task<IActionResult> GetSecurityAuditLogs(
+        [FromQuery] string? search = null,
+        [FromQuery] string? action = null,
+        [FromQuery] string? entity = null,
+        [FromQuery] string? dateRange = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 15)
+    {
+        return await GetAuditLogsInternal(search, action, entity, dateRange, page, pageSize, LogTypeSecurity);
+    }
+
+    private async Task<IActionResult> GetAuditLogsInternal(
+        string? search,
+        string? action,
+        string? entity,
+        string? dateRange,
+        int page,
+        int pageSize,
+        string? logType)
     {
         if (page < 1) page = 1;
         if (pageSize < 1) pageSize = 1;
         if (pageSize > 100) pageSize = 100;
+
+        if (!TryNormalizeLogType(logType, out var normalizedLogType))
+        {
+            return BadRequest(new { success = false, message = "Invalid logType. Allowed values are System or Security." });
+        }
 
         var companyId = GetCurrentCompanyId();
         if (companyId == 0)
@@ -345,47 +395,11 @@ public class CompanyAdminController : ControllerBase
 
         try
         {
-            var query = _context.AuditLogs
-                .Include(a => a.User)
-                .Where(a => a.CompanyID == companyId);
+            var companyScopedLogs = _context.AuditLogs.Where(a => a.CompanyID == companyId);
+            var systemCount = await companyScopedLogs.CountAsync(a => a.LogType == LogTypeSystem || a.LogType == null);
+            var securityCount = await companyScopedLogs.CountAsync(a => a.LogType == LogTypeSecurity);
 
-            // Search filter
-            if (!string.IsNullOrWhiteSpace(search))
-            {
-                var s = search.ToLower();
-                query = query.Where(a =>
-                    a.Action.ToLower().Contains(s) ||
-                    a.EntityName.ToLower().Contains(s) ||
-                    a.User.Fname.ToLower().Contains(s) ||
-                    a.User.Lname.ToLower().Contains(s) ||
-                    a.User.Email.ToLower().Contains(s));
-            }
-
-            // Action filter
-            if (!string.IsNullOrWhiteSpace(action) && action != "All")
-            {
-                query = query.Where(a => a.Action.ToLower().Contains(action.ToLower()));
-            }
-
-            // Entity filter
-            if (!string.IsNullOrWhiteSpace(entity) && entity != "All")
-            {
-                query = query.Where(a => a.EntityName.ToLower().Contains(entity.ToLower()));
-            }
-
-            // Date range filter
-            if (!string.IsNullOrWhiteSpace(dateRange))
-            {
-                var now = DateTime.UtcNow;
-                query = dateRange switch
-                {
-                    "today" => query.Where(a => a.CreatedAt.Date == now.Date),
-                    "7days" => query.Where(a => a.CreatedAt >= now.AddDays(-7)),
-                    "30days" => query.Where(a => a.CreatedAt >= now.AddDays(-30)),
-                    "90days" => query.Where(a => a.CreatedAt >= now.AddDays(-90)),
-                    _ => query
-                };
-            }
+            var query = BuildAuditLogQuery(companyId, search, action, entity, dateRange, normalizedLogType);
 
             var totalCount = await query.CountAsync();
             var logs = await query
@@ -400,6 +414,7 @@ public class CompanyAdminController : ControllerBase
                     action = a.Action,
                     entityName = a.EntityName,
                     entityId = a.EntityID,
+                    logType = string.IsNullOrWhiteSpace(a.LogType) ? LogTypeSystem : a.LogType,
                     ipAddress = a.IPAddress,
                     createdAt = a.CreatedAt
                 })
@@ -415,6 +430,11 @@ public class CompanyAdminController : ControllerBase
                     page,
                     pageSize,
                     totalPages = (int)Math.Ceiling(totalCount / (double)pageSize)
+                },
+                counts = new
+                {
+                    system = systemCount,
+                    security = securityCount
                 }
             });
         }
@@ -423,6 +443,94 @@ public class CompanyAdminController : ControllerBase
             _logger.LogError(ex, "Error fetching audit logs for company {CompanyId}", companyId);
             return StatusCode(500, new { success = false, message = "Failed to fetch audit logs." });
         }
+    }
+
+    private IQueryable<AuditLog> BuildAuditLogQuery(
+        int companyId,
+        string? search,
+        string? action,
+        string? entity,
+        string? dateRange,
+        string? normalizedLogType)
+    {
+        var query = _context.AuditLogs
+            .Include(a => a.User)
+            .Where(a => a.CompanyID == companyId);
+
+        if (normalizedLogType == LogTypeSystem)
+        {
+            query = query.Where(a => a.LogType == LogTypeSystem || a.LogType == null);
+        }
+        else if (normalizedLogType == LogTypeSecurity)
+        {
+            query = query.Where(a => a.LogType == LogTypeSecurity);
+        }
+
+        // Search filter
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.ToLower();
+            query = query.Where(a =>
+                a.Action.ToLower().Contains(s) ||
+                a.EntityName.ToLower().Contains(s) ||
+                a.User.Fname.ToLower().Contains(s) ||
+                a.User.Lname.ToLower().Contains(s) ||
+                a.User.Email.ToLower().Contains(s));
+        }
+
+        // Action filter
+        if (!string.IsNullOrWhiteSpace(action) && action != "All")
+        {
+            var actionPattern = $"%{action.Trim()}%";
+            query = query.Where(a => EF.Functions.Like(a.Action, actionPattern));
+        }
+
+        // Entity filter
+        if (!string.IsNullOrWhiteSpace(entity) && entity != "All")
+        {
+            var entityPattern = $"%{entity.Trim()}%";
+            query = query.Where(a => EF.Functions.Like(a.EntityName, entityPattern));
+        }
+
+        // Date range filter
+        if (!string.IsNullOrWhiteSpace(dateRange))
+        {
+            var now = DateTime.UtcNow;
+            query = dateRange switch
+            {
+                "today" => query.Where(a => a.CreatedAt.Date == now.Date),
+                "7days" => query.Where(a => a.CreatedAt >= now.AddDays(-7)),
+                "30days" => query.Where(a => a.CreatedAt >= now.AddDays(-30)),
+                "90days" => query.Where(a => a.CreatedAt >= now.AddDays(-90)),
+                _ => query
+            };
+        }
+
+        return query;
+    }
+
+    private static bool TryNormalizeLogType(string? logType, out string? normalizedLogType)
+    {
+        normalizedLogType = null;
+
+        if (string.IsNullOrWhiteSpace(logType))
+        {
+            return true;
+        }
+
+        if (string.Equals(logType, LogTypeSystem, StringComparison.OrdinalIgnoreCase))
+        {
+            normalizedLogType = LogTypeSystem;
+            return true;
+        }
+
+        if (string.Equals(logType, LogTypeSecurity, StringComparison.OrdinalIgnoreCase))
+        {
+            normalizedLogType = LogTypeSecurity;
+            return true;
+        }
+
+        return false;
     }
 
     // ─── Subscription ────────────────────────────

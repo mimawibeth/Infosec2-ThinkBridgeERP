@@ -1,7 +1,10 @@
+@inject IConfiguration Configuration
+
 @{
     ViewData["Title"] = "Login";
     ViewData["HideLayout"] = true;
     ViewData["BodyClass"] = "login-page";
+    var turnstileSiteKey = Configuration["Turnstile:SiteKey"] ?? string.Empty;
 }
 
 @section PageStyles {
@@ -139,8 +142,57 @@
                             </div>
                         </div>
 
+                        <div class="form-group captcha-group">
+                            <div id="login-turnstile" class="turnstile-widget"></div>
+                        </div>
+
                         <div class="form-group error-message" id="errorMessage" style="display: none;">
                             <span class="error-text">Invalid password. Please try again.</span>
+                        </div>
+
+                        <div class="renew-subscription-cta" id="renewSubscriptionCta" style="display: none;">
+                            <p class="renew-cta-text">Need access back to your workspace? Continue with secure renewal checkout.</p>
+                            <button type="button" class="btn btn-secondary" id="renewSubscriptionBtn">Renew Subscription</button>
+                        </div>
+
+                        <div class="mfa-step" id="mfaStep" style="display: none;">
+                            <div class="mfa-header">
+                                <h3>Two-Factor Verification</h3>
+                                <p id="mfaMessage">Enter the code from your authenticator app.</p>
+                            </div>
+
+                            <div class="mfa-enrollment" id="mfaEnrollment" style="display: none;">
+                                <div class="mfa-enrollment-grid">
+                                    <div class="mfa-qr-wrap">
+                                        <img id="mfaQrImage" alt="Authenticator setup QR code" />
+                                    </div>
+                                    <div>
+                                        <p class="mfa-setup-note">Scan the QR code in Google Authenticator (or any TOTP app), then enter the 6-digit code below.</p>
+                                        <button type="button" class="link-button mfa-manual-toggle" id="mfaManualKeyToggle">Can't scan QR? Enter key manually</button>
+                                        <div id="mfaManualKeyWrap" style="display: none;">
+                                            <label for="mfaSecret" class="mfa-secret-label">Manual setup key</label>
+                                            <input type="text" id="mfaSecret" class="form-input" readonly />
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-group" id="mfaTotpGroup">
+                                <label for="mfaCode">Authenticator Code</label>
+                                <input type="text" id="mfaCode" class="form-input" inputmode="numeric" autocomplete="one-time-code"
+                                       placeholder="000000" maxlength="8" />
+                            </div>
+
+                            <div class="form-group" id="mfaBackupGroup" style="display: none;">
+                                <label for="mfaBackupCode">Backup Code</label>
+                                <input type="text" id="mfaBackupCode" class="form-input" autocomplete="one-time-code"
+                                       placeholder="ABCD-EFGH" maxlength="20" />
+                            </div>
+
+                            <div class="mfa-links">
+                                <button type="button" class="link-button" id="mfaToggleModeBtn">Use backup code instead</button>
+                                <button type="button" class="link-button" id="mfaBackToLoginBtn">Back to login</button>
+                            </div>
                         </div>
 
                         <a href="#" class="forgot-password-link" id="forgot-password-link">Forgot your password?</a>
@@ -186,6 +238,9 @@
                                     <label for="forgot-email">Email Address</label>
                                     <input type="email" id="forgot-email" class="form-input" placeholder="Enter your email address"
                                            required />
+                                </div>
+                                <div class="form-group captcha-group">
+                                    <div id="forgot-turnstile" class="turnstile-widget"></div>
                                 </div>
                                 <div class="form-group error-message" id="forgot-error" style="display: none;">
                                     <span class="error-text" id="forgot-error-text"></span>
@@ -394,6 +449,48 @@
                                                                         </div>
 
                                                                         <script>
+                                                                            const turnstileSiteKey = '@turnstileSiteKey';
+                                                                            let loginTurnstileWidgetId = null;
+                                                                            let forgotTurnstileWidgetId = null;
+
+                                                                            window.onTurnstileLoad = function () {
+                                                                                if (!turnstileSiteKey || !window.turnstile) {
+                                                                                    return;
+                                                                                }
+
+                                                                                const loginContainer = document.getElementById('login-turnstile');
+                                                                                if (loginContainer && loginTurnstileWidgetId === null) {
+                                                                                    loginTurnstileWidgetId = window.turnstile.render(loginContainer, {
+                                                                                        sitekey: turnstileSiteKey,
+                                                                                        theme: 'light'
+                                                                                    });
+                                                                                }
+
+                                                                                const forgotContainer = document.getElementById('forgot-turnstile');
+                                                                                if (forgotContainer && forgotTurnstileWidgetId === null) {
+                                                                                    forgotTurnstileWidgetId = window.turnstile.render(forgotContainer, {
+                                                                                        sitekey: turnstileSiteKey,
+                                                                                        theme: 'light'
+                                                                                    });
+                                                                                }
+                                                                            };
+
+                                                                            function getTurnstileToken(containerId) {
+                                                                                const container = document.getElementById(containerId);
+                                                                                const tokenInput = container?.querySelector('input[name="cf-turnstile-response"]');
+                                                                                return tokenInput?.value?.trim() || '';
+                                                                            }
+
+                                                                            function resetTurnstile(widgetId) {
+                                                                                if (window.turnstile && widgetId !== null) {
+                                                                                    window.turnstile.reset(widgetId);
+                                                                                }
+                                                                            }
+                                                                        </script>
+                                                                        <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad&render=explicit" async
+                                                                                defer></script>
+
+                                                                        <script>
                                                                             // Password toggle
                                                                             document.getElementById('toggle-password').addEventListener('click', function () {
                                                                                 const passwordInput = document.getElementById('password');
@@ -427,50 +524,344 @@
                                                                                 });
                                                                             });
 
-                                                                            // Form submission with API call
-                                                                            document.getElementById('loginForm').addEventListener('submit', async function (e) {
+                                                                            const loginForm = document.getElementById('loginForm');
+                                                                            const errorMessage = document.getElementById('errorMessage');
+                                                                            const loginBtn = document.getElementById('loginBtn');
+                                                                            const renewSubscriptionCta = document.getElementById('renewSubscriptionCta');
+                                                                            const renewSubscriptionBtn = document.getElementById('renewSubscriptionBtn');
+                                                                            const forgotPasswordLink = document.getElementById('forgot-password-link');
+                                                                            const mfaStep = document.getElementById('mfaStep');
+                                                                            const mfaMessage = document.getElementById('mfaMessage');
+                                                                            const mfaEnrollment = document.getElementById('mfaEnrollment');
+                                                                            const mfaQrImage = document.getElementById('mfaQrImage');
+                                                                            const mfaSecretInput = document.getElementById('mfaSecret');
+                                                                            const mfaManualKeyWrap = document.getElementById('mfaManualKeyWrap');
+                                                                            const mfaManualKeyToggle = document.getElementById('mfaManualKeyToggle');
+                                                                            const mfaTotpGroup = document.getElementById('mfaTotpGroup');
+                                                                            const mfaBackupGroup = document.getElementById('mfaBackupGroup');
+                                                                            const mfaCodeInput = document.getElementById('mfaCode');
+                                                                            const mfaBackupCodeInput = document.getElementById('mfaBackupCode');
+                                                                            const mfaToggleModeBtn = document.getElementById('mfaToggleModeBtn');
+                                                                            const mfaBackToLoginBtn = document.getElementById('mfaBackToLoginBtn');
+                                                                            const emailGroup = document.getElementById('email').closest('.form-group');
+                                                                            const passwordGroup = document.getElementById('password').closest('.form-group');
+                                                                            const captchaGroup = document.getElementById('login-turnstile').closest('.form-group');
+
+                                                                            const loginButtonDefaultHtml = 'Sign In <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>';
+                                                                            let renewalToken = '';
+                                                                            let pendingMfaToken = '';
+                                                                            let mfaMode = 'totp';
+                                                                            let mfaEnrollmentMode = false;
+
+                                                                            const formatLockoutTime = (totalSeconds) => {
+                                                                                const minutes = Math.floor(totalSeconds / 60);
+                                                                                const seconds = totalSeconds % 60;
+                                                                                return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+                                                                            };
+
+                                                                            const hideRenewSubscriptionCta = () => {
+                                                                                renewalToken = '';
+                                                                                renewSubscriptionCta.style.display = 'none';
+                                                                                renewSubscriptionBtn.disabled = false;
+                                                                                renewSubscriptionBtn.textContent = 'Renew Subscription';
+                                                                            };
+
+                                                                            const showRenewSubscriptionCta = (token) => {
+                                                                                renewalToken = token;
+                                                                                renewSubscriptionCta.style.display = 'flex';
+                                                                                renewSubscriptionBtn.disabled = false;
+                                                                                renewSubscriptionBtn.textContent = 'Renew Subscription';
+                                                                            };
+
+                                                                            const getPrimaryButtonIdleLabel = () => {
+                                                                                if (!pendingMfaToken) {
+                                                                                    return loginButtonDefaultHtml;
+                                                                                }
+
+                                                                                return mfaEnrollmentMode ? 'Complete Setup' : 'Verify Code';
+                                                                            };
+
+                                                                            const setPrimaryButtonState = (loading, label) => {
+                                                                                loginBtn.disabled = loading;
+                                                                                loginBtn.innerHTML = loading
+                                                                                    ? `<span class="spinner"></span> ${label}`
+                                                                                    : getPrimaryButtonIdleLabel();
+                                                                            };
+
+                                                                            const showError = (message) => {
+                                                                                errorMessage.querySelector('.error-text').textContent = message;
+                                                                                errorMessage.style.display = 'block';
+                                                                            };
+
+                                                                            const hideError = () => {
+                                                                                errorMessage.style.display = 'none';
+                                                                            };
+
+                                                                            const setCredentialFieldsVisible = (visible) => {
+                                                                                emailGroup.style.display = visible ? '' : 'none';
+                                                                                passwordGroup.style.display = visible ? '' : 'none';
+                                                                                captchaGroup.style.display = visible ? '' : 'none';
+                                                                                forgotPasswordLink.style.display = visible ? '' : 'none';
+                                                                            };
+
+                                                                            const setMfaMode = (mode) => {
+                                                                                if (mfaEnrollmentMode) {
+                                                                                    mfaMode = 'totp';
+                                                                                    mfaTotpGroup.style.display = '';
+                                                                                    mfaBackupGroup.style.display = 'none';
+                                                                                    mfaToggleModeBtn.style.display = 'none';
+                                                                                    mfaBackToLoginBtn.style.display = 'none';
+                                                                                    mfaCodeInput.focus();
+                                                                                    return;
+                                                                                }
+
+                                                                                mfaMode = mode === 'backup' ? 'backup' : 'totp';
+                                                                                const useBackup = mfaMode === 'backup';
+                                                                                mfaTotpGroup.style.display = useBackup ? 'none' : '';
+                                                                                mfaBackupGroup.style.display = useBackup ? '' : 'none';
+                                                                                mfaToggleModeBtn.style.display = '';
+                                                                                mfaBackToLoginBtn.style.display = '';
+                                                                                mfaToggleModeBtn.textContent = useBackup
+                                                                                    ? 'Use authenticator code instead'
+                                                                                    : 'Use backup code instead';
+
+                                                                                if (useBackup) {
+                                                                                    mfaBackupCodeInput.focus();
+                                                                                } else {
+                                                                                    mfaCodeInput.focus();
+                                                                                }
+                                                                            };
+
+                                                                            const resetMfaStep = () => {
+                                                                                pendingMfaToken = '';
+                                                                                mfaEnrollmentMode = false;
+                                                                                mfaCodeInput.value = '';
+                                                                                mfaBackupCodeInput.value = '';
+                                                                                mfaSecretInput.value = '';
+                                                                                mfaManualKeyWrap.style.display = 'none';
+                                                                                mfaManualKeyToggle.textContent = "Can't scan QR? Enter key manually";
+                                                                                mfaQrImage.removeAttribute('src');
+                                                                                mfaEnrollment.style.display = 'none';
+                                                                                mfaStep.style.display = 'none';
+                                                                                setCredentialFieldsVisible(true);
+                                                                                setMfaMode('totp');
+                                                                            };
+
+                                                                            const showMfaStep = (mfaToken, message, setup, isEnrollment) => {
+                                                                                pendingMfaToken = mfaToken;
+                                                                                mfaEnrollmentMode = !!isEnrollment;
+                                                                                mfaMessage.textContent = mfaEnrollmentMode
+                                                                                    ? (message || 'Set up your authenticator app to continue.')
+                                                                                    : (message || 'Enter the code from your authenticator app.');
+                                                                                mfaCodeInput.value = '';
+                                                                                mfaBackupCodeInput.value = '';
+
+                                                                                if (mfaEnrollmentMode && setup) {
+                                                                                    mfaSecretInput.value = setup.secret || '';
+                                                                                    mfaManualKeyWrap.style.display = 'none';
+                                                                                    mfaManualKeyToggle.textContent = "Can't scan QR? Enter key manually";
+                                                                                    const provisioningUri = setup.provisioningUri || '';
+                                                                                    mfaQrImage.src = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(provisioningUri)}`;
+                                                                                    mfaEnrollment.style.display = '';
+                                                                                } else {
+                                                                                    mfaSecretInput.value = '';
+                                                                                    mfaManualKeyWrap.style.display = 'none';
+                                                                                    mfaManualKeyToggle.textContent = "Can't scan QR? Enter key manually";
+                                                                                    mfaQrImage.removeAttribute('src');
+                                                                                    mfaEnrollment.style.display = 'none';
+                                                                                }
+
+                                                                                hideRenewSubscriptionCta();
+                                                                                setCredentialFieldsVisible(false);
+                                                                                mfaStep.style.display = 'block';
+                                                                                setMfaMode('totp');
+                                                                                setPrimaryButtonState(false, '');
+                                                                            };
+
+                                                                            const startLockoutTimer = (seconds, message) => {
+                                                                                if (window._lockoutTimer) {
+                                                                                    clearInterval(window._lockoutTimer);
+                                                                                    window._lockoutTimer = null;
+                                                                                }
+
+                                                                                let remainingSeconds = seconds;
+                                                                                showError(message.replace('{time}', formatLockoutTime(remainingSeconds)));
+                                                                                loginBtn.disabled = true;
+                                                                                loginBtn.innerHTML = `Locked (${formatLockoutTime(remainingSeconds)})`;
+
+                                                                                window._lockoutTimer = setInterval(() => {
+                                                                                    remainingSeconds--;
+                                                                                    if (remainingSeconds <= 0) {
+                                                                                        clearInterval(window._lockoutTimer);
+                                                                                        window._lockoutTimer = null;
+                                                                                        hideError();
+                                                                                        loginBtn.disabled = false;
+                                                                                        loginBtn.innerHTML = getPrimaryButtonIdleLabel();
+                                                                                    } else {
+                                                                                        showError(message.replace('{time}', formatLockoutTime(remainingSeconds)));
+                                                                                        loginBtn.innerHTML = `Locked (${formatLockoutTime(remainingSeconds)})`;
+                                                                                    }
+                                                                                }, 1000);
+                                                                            };
+
+                                                                            renewSubscriptionBtn.onclick = async function () {
+                                                                                if (!renewalToken) {
+                                                                                    return;
+                                                                                }
+
+                                                                                renewSubscriptionBtn.disabled = true;
+                                                                                renewSubscriptionBtn.textContent = 'Redirecting...';
+
+                                                                                try {
+                                                                                    const renewalResponse = await fetch('/Auth/CreateRenewalCheckout', {
+                                                                                        method: 'POST',
+                                                                                        headers: { 'Content-Type': 'application/json' },
+                                                                                        credentials: 'same-origin',
+                                                                                        body: JSON.stringify({ renewalToken: renewalToken })
+                                                                                    });
+
+                                                                                    if (!renewalResponse.ok) {
+                                                                                        throw new Error(`HTTP error! status: ${renewalResponse.status}`);
+                                                                                    }
+
+                                                                                    const renewalResult = await renewalResponse.json();
+                                                                                    if (renewalResult.success && renewalResult.checkoutUrl) {
+                                                                                        window.location.href = renewalResult.checkoutUrl;
+                                                                                        return;
+                                                                                    }
+
+                                                                                    showError(renewalResult.message || 'Unable to start renewal checkout. Please try again.');
+                                                                                    renewSubscriptionBtn.disabled = false;
+                                                                                    renewSubscriptionBtn.textContent = 'Renew Subscription';
+                                                                                } catch (error) {
+                                                                                    showError('Unable to start renewal checkout. Please try again.');
+                                                                                    renewSubscriptionBtn.disabled = false;
+                                                                                    renewSubscriptionBtn.textContent = 'Renew Subscription';
+                                                                                }
+                                                                            };
+
+                                                                            mfaToggleModeBtn.addEventListener('click', function () {
+                                                                                setMfaMode(mfaMode === 'totp' ? 'backup' : 'totp');
+                                                                            });
+
+                                                                            mfaManualKeyToggle.addEventListener('click', function () {
+                                                                                if (!mfaEnrollmentMode) {
+                                                                                    return;
+                                                                                }
+
+                                                                                const showManualKey = mfaManualKeyWrap.style.display === 'none';
+                                                                                mfaManualKeyWrap.style.display = showManualKey ? '' : 'none';
+                                                                                mfaManualKeyToggle.textContent = showManualKey
+                                                                                    ? 'Hide manual key'
+                                                                                    : "Can't scan QR? Enter key manually";
+                                                                            });
+
+                                                                            mfaBackToLoginBtn.addEventListener('click', function () {
+                                                                                resetMfaStep();
+                                                                                setPrimaryButtonState(false, '');
+                                                                            });
+
+                                                                            loginForm.addEventListener('submit', async function (e) {
                                                                                 e.preventDefault();
+
+                                                                                if (window._lockoutTimer) {
+                                                                                    return;
+                                                                                }
+
+                                                                                hideError();
+
+                                                                                if (pendingMfaToken) {
+                                                                                    const verificationCode = ((mfaEnrollmentMode || mfaMode !== 'backup')
+                                                                                        ? mfaCodeInput.value
+                                                                                        : mfaBackupCodeInput.value).trim();
+                                                                                    if (!verificationCode) {
+                                                                                        showError((!mfaEnrollmentMode && mfaMode === 'backup')
+                                                                                            ? 'Please enter a backup code.'
+                                                                                            : 'Please enter the authenticator code.');
+                                                                                        return;
+                                                                                    }
+
+                                                                                    setPrimaryButtonState(true, mfaEnrollmentMode ? 'Completing setup...' : 'Verifying...');
+
+                                                                                    try {
+                                                                                        const mfaResponse = await fetch(mfaEnrollmentMode ? '/Auth/EnrollTotp' : '/Auth/VerifyTotp', {
+                                                                                            method: 'POST',
+                                                                                            headers: { 'Content-Type': 'application/json' },
+                                                                                            credentials: 'same-origin',
+                                                                                            body: JSON.stringify({
+                                                                                                mfaToken: pendingMfaToken,
+                                                                                                code: verificationCode
+                                                                                            })
+                                                                                        });
+
+                                                                                        if (!mfaResponse.ok) {
+                                                                                            throw new Error(`HTTP error! status: ${mfaResponse.status}`);
+                                                                                        }
+
+                                                                                        const mfaResult = await mfaResponse.json();
+                                                                                        if (mfaResult.success) {
+                                                                                            sessionStorage.setItem('userRole', mfaResult.user.role.toLowerCase());
+                                                                                            sessionStorage.setItem('userName', mfaResult.user.name);
+                                                                                            sessionStorage.setItem('userEmail', mfaResult.user.email);
+                                                                                            if (Array.isArray(mfaResult.backupCodes) && mfaResult.backupCodes.length > 0) {
+                                                                                                sessionStorage.setItem('tb_new_backup_codes', JSON.stringify(mfaResult.backupCodes));
+                                                                                            }
+                                                                                            localStorage.removeItem('tb_onboarding_done');
+                                                                                            window.location.href = mfaResult.redirectUrl;
+                                                                                            return;
+                                                                                        }
+
+                                                                                        if (mfaResult.lockoutSeconds > 0) {
+                                                                                            startLockoutTimer(
+                                                                                                mfaResult.lockoutSeconds,
+                                                                                                'Too many invalid verification attempts. Please try again after {time}.'
+                                                                                            );
+                                                                                        } else {
+                                                                                            showError(mfaResult.message || 'Verification failed. Please try again.');
+                                                                                            setPrimaryButtonState(false, '');
+                                                                                        }
+                                                                                    } catch (error) {
+                                                                                        console.error('MFA verification error:', error);
+                                                                                        showError('An error occurred while verifying your code. Please try again.');
+                                                                                        setPrimaryButtonState(false, '');
+                                                                                    }
+
+                                                                                    return;
+                                                                                }
+
+                                                                                hideRenewSubscriptionCta();
 
                                                                                 const email = document.getElementById('email').value.toLowerCase().trim();
                                                                                 const password = document.getElementById('password').value;
-                                                                                const errorMessage = document.getElementById('errorMessage');
-                                                                                const loginBtn = document.getElementById('loginBtn');
 
-                                                                                // Block submission during lockout
-                                                                                if (window._lockoutTimer) { return; }
-
-                                                                                // Hide previous error
-                                                                                errorMessage.style.display = 'none';
-
-                                                                                // Validate email
                                                                                 if (!email) {
-                                                                                    errorMessage.querySelector('.error-text').textContent = 'Please enter your email address.';
-                                                                                    errorMessage.style.display = 'block';
+                                                                                    showError('Please enter your email address.');
                                                                                     return;
                                                                                 }
 
-                                                                                // Validate password
                                                                                 if (!password) {
-                                                                                    errorMessage.querySelector('.error-text').textContent = 'Please enter your password.';
-                                                                                    errorMessage.style.display = 'block';
+                                                                                    showError('Please enter your password.');
                                                                                     return;
                                                                                 }
 
-                                                                                // Disable button and show loading state
-                                                                                loginBtn.disabled = true;
-                                                                                loginBtn.innerHTML = '<span class="spinner"></span> Signing in...';
+                                                                                const captchaToken = getTurnstileToken('login-turnstile');
+                                                                                if (!captchaToken) {
+                                                                                    showError('Please complete the security verification.');
+                                                                                    return;
+                                                                                }
+
+                                                                                setPrimaryButtonState(true, 'Signing in...');
 
                                                                                 try {
                                                                                     const response = await fetch('/Auth/Login', {
                                                                                         method: 'POST',
-                                                                                        headers: {
-                                                                                            'Content-Type': 'application/json'
-                                                                                        },
+                                                                                        headers: { 'Content-Type': 'application/json' },
                                                                                         credentials: 'same-origin',
                                                                                         body: JSON.stringify({
                                                                                             email: email,
                                                                                             password: password,
-                                                                                            rememberMe: false
+                                                                                            rememberMe: false,
+                                                                                            captchaToken: captchaToken
                                                                                         })
                                                                                     });
 
@@ -481,54 +872,48 @@
                                                                                     const result = await response.json();
 
                                                                                     if (result.success) {
-                                                                                        // Store user info in sessionStorage
                                                                                         sessionStorage.setItem('userRole', result.user.role.toLowerCase());
                                                                                         sessionStorage.setItem('userName', result.user.name);
                                                                                         sessionStorage.setItem('userEmail', result.user.email);
-
-                                                                                        // Clear stale onboarding state so new user gets fresh tour
                                                                                         localStorage.removeItem('tb_onboarding_done');
-
-                                                                                        // Redirect to appropriate dashboard
                                                                                         window.location.href = result.redirectUrl;
+                                                                                        return;
+                                                                                    }
+
+                                                                                    resetTurnstile(loginTurnstileWidgetId);
+
+                                                                                    if (result.requiresTotp && result.mfaToken) {
+                                                                                        showMfaStep(
+                                                                                            result.mfaToken,
+                                                                                            result.message,
+                                                                                            result.setup || null,
+                                                                                            result.requiresTotpEnrollment === true
+                                                                                        );
+                                                                                        setPrimaryButtonState(false, '');
+                                                                                        return;
+                                                                                    }
+
+                                                                                    if (result.lockoutSeconds > 0) {
+                                                                                        startLockoutTimer(
+                                                                                            result.lockoutSeconds,
+                                                                                            'Too many failed login attempts. Please try again after {time}.'
+                                                                                        );
                                                                                     } else {
-                                                                                        // Clear any existing lockout timer
-                                                                                        if (window._lockoutTimer) { clearInterval(window._lockoutTimer); window._lockoutTimer = null; }
+                                                                                        showError(result.message || 'Login failed. Please try again.');
 
-                                                                                        if (result.lockoutSeconds > 0) {
-                                                                                            // Start live countdown on button only
-                                                                                            let secs = result.lockoutSeconds;
-                                                                                            const errorText = errorMessage.querySelector('.error-text');
-                                                                                            errorText.textContent = 'Too many failed login attempts. Please try again after 1 minute.';
-                                                                                            errorMessage.style.display = 'block';
-                                                                                            loginBtn.disabled = true;
-                                                                                            loginBtn.innerHTML = `Locked (${secs}s)`;
-
-                                                                                            window._lockoutTimer = setInterval(() => {
-                                                                                                secs--;
-                                                                                                if (secs <= 0) {
-                                                                                                    clearInterval(window._lockoutTimer);
-                                                                                                    window._lockoutTimer = null;
-                                                                                                    errorMessage.style.display = 'none';
-                                                                                                    loginBtn.disabled = false;
-                                                                                                    loginBtn.innerHTML = 'Sign In <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>';
-                                                                                                } else {
-                                                                                                    loginBtn.innerHTML = `Locked (${secs}s)`;
-                                                                                                }
-                                                                                            }, 1000);
+                                                                                        if (result.errorCode === 'subscription_expired' && result.canRenewSubscription && result.renewalToken) {
+                                                                                            showRenewSubscriptionCta(result.renewalToken);
                                                                                         } else {
-                                                                                            errorMessage.querySelector('.error-text').textContent = result.message || 'Login failed. Please try again.';
-                                                                                            errorMessage.style.display = 'block';
-                                                                                            loginBtn.disabled = false;
-                                                                                            loginBtn.innerHTML = 'Sign In <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>';
+                                                                                            hideRenewSubscriptionCta();
                                                                                         }
+
+                                                                                        setPrimaryButtonState(false, '');
                                                                                     }
                                                                                 } catch (error) {
+                                                                                    resetTurnstile(loginTurnstileWidgetId);
                                                                                     console.error('Login error:', error);
-                                                                                    errorMessage.querySelector('.error-text').textContent = 'An error occurred. Please try again.';
-                                                                                    errorMessage.style.display = 'block';
-                                                                                    loginBtn.disabled = false;
-                                                                                    loginBtn.innerHTML = 'Sign In <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>';
+                                                                                    showError('An error occurred. Please try again.');
+                                                                                    setPrimaryButtonState(false, '');
                                                                                 }
                                                                             });
 
@@ -544,6 +929,7 @@
                                                                                 document.getElementById('forgot-done-footer').style.display = 'none';
                                                                                 document.getElementById('forgot-submit-btn').disabled = false;
                                                                                 document.getElementById('forgot-submit-btn').textContent = 'Send Reset Email';
+                                                                                resetTurnstile(forgotTurnstileWidgetId);
                                                                                 document.getElementById('forgot-password-modal').classList.add('active');
                                                                             });
 
@@ -561,6 +947,13 @@
                                                                                     return;
                                                                                 }
 
+                                                                                const forgotCaptchaToken = getTurnstileToken('forgot-turnstile');
+                                                                                if (!forgotCaptchaToken) {
+                                                                                    errorText.textContent = 'Please complete the security verification.';
+                                                                                    errorDiv.style.display = 'block';
+                                                                                    return;
+                                                                                }
+
                                                                                 submitBtn.disabled = true;
                                                                                 submitBtn.textContent = 'Sending...';
 
@@ -568,23 +961,29 @@
                                                                                     const response = await fetch('/Auth/ForgotPassword', {
                                                                                         method: 'POST',
                                                                                         headers: { 'Content-Type': 'application/json' },
-                                                                                        body: JSON.stringify({ email: email })
+                                                                                        body: JSON.stringify({ email: email, captchaToken: forgotCaptchaToken })
                                                                                     });
 
                                                                                     const result = await response.json();
 
                                                                                     if (result.success) {
+                                                                                        const successText = document.getElementById('forgot-success-text');
+                                                                                        if (successText && result.message) {
+                                                                                            successText.textContent = result.message;
+                                                                                        }
                                                                                         document.getElementById('forgot-password-form-container').style.display = 'none';
                                                                                         document.getElementById('forgot-success-container').style.display = 'block';
                                                                                         document.getElementById('forgot-footer').style.display = 'none';
                                                                                         document.getElementById('forgot-done-footer').style.display = '';
                                                                                     } else {
+                                                                                        resetTurnstile(forgotTurnstileWidgetId);
                                                                                         errorText.textContent = result.message || 'Something went wrong. Please try again.';
                                                                                         errorDiv.style.display = 'block';
                                                                                         submitBtn.disabled = false;
                                                                                         submitBtn.textContent = 'Send Reset Email';
                                                                                     }
                                                                                 } catch (error) {
+                                                                                    resetTurnstile(forgotTurnstileWidgetId);
                                                                                     errorText.textContent = 'An error occurred. Please try again.';
                                                                                     errorDiv.style.display = 'block';
                                                                                     submitBtn.disabled = false;

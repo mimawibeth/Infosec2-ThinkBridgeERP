@@ -1,12 +1,20 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
 
 namespace ThinkBridge_ERP.Controllers
 {
     [Authorize]
     public class WebController : Controller
     {
+        private readonly IConfiguration _configuration;
+
+        public WebController(IConfiguration configuration)
+        {
+            _configuration = configuration;
+        }
+
         // Helper method to set user role from authentication claims
         private void SetUserRoleFromClaims()
         {
@@ -55,6 +63,22 @@ namespace ThinkBridge_ERP.Controllers
         public IActionResult SuperAdminReports()
         {
             SetUserRoleFromClaims();
+            return View();
+        }
+
+        // Super Admin - Security
+        [Authorize(Policy = "SuperAdminOnly")]
+        public IActionResult SuperAdminSecurity()
+        {
+            SetUserRoleFromClaims();
+
+            var currentUserEmail = (ViewData["UserEmail"] as string)?.Trim() ?? string.Empty;
+            var backupEmail = _configuration["Security:EmergencyAdmin:BackupSuperAdminEmail"]?.Trim() ?? string.Empty;
+            var isBackupEmergencyAdmin = !string.IsNullOrWhiteSpace(currentUserEmail) &&
+                                         !string.IsNullOrWhiteSpace(backupEmail) &&
+                                         string.Equals(currentUserEmail, backupEmail, StringComparison.OrdinalIgnoreCase);
+
+            ViewData["IsBackupEmergencyAdmin"] = isBackupEmergencyAdmin;
             return View();
         }
 

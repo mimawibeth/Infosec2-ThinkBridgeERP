@@ -34,6 +34,32 @@ public interface ISuperAdminService
 
     // Platform Reports
     Task<PlatformReportResult> GetPlatformReportAsync(PlatformReportRequest request);
+
+    // Emergency Admin Security Controls
+    Task<EmergencyAdminStatusResult> GetEmergencyAdminStatusAsync();
+    Task<ServiceResult> SuspendPrimarySuperAdminAsync(int performedByUserId, string performedByEmail, EmergencySuperAdminActionRequest request, string? ipAddress = null);
+    Task<ServiceResult> ReactivatePrimarySuperAdminAsync(int performedByUserId, string performedByEmail, EmergencySuperAdminActionRequest request, string? ipAddress = null);
+}
+
+public class EmergencySuperAdminActionRequest
+{
+    public string ConfirmationPhrase { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
+    public string? CurrentPassword { get; set; }
+    public string? TotpCode { get; set; }
+}
+
+public class EmergencyAdminStatusResult : ServiceResult
+{
+    public string PrimarySuperAdminEmail { get; set; } = string.Empty;
+    public string BackupSuperAdminEmail { get; set; } = string.Empty;
+    public string ExpectedConfirmationPhrase { get; set; } = string.Empty;
+    public int CooldownSeconds { get; set; }
+    public bool PrimaryUserFound { get; set; }
+    public string PrimaryStatus { get; set; } = "Unknown";
+    public bool IsPrimarySuspended { get; set; }
+    public bool IsPrimaryPermanentlyLocked { get; set; }
+    public DateTime? LastEmergencyActionAt { get; set; }
 }
 
 // === Platform Report DTOs ===

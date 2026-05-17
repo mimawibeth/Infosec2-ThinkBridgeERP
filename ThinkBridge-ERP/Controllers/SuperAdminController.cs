@@ -15,17 +15,20 @@ public class SuperAdminController : ControllerBase
     private readonly ISuperAdminService _superAdminService;
     private readonly PdfReportService _pdfReportService;
     private readonly ILogger<SuperAdminController> _logger;
+    private readonly IConfiguration _configuration;
 
     public SuperAdminController(
         ICompanyService companyService,
         ISuperAdminService superAdminService,
         PdfReportService pdfReportService,
-        ILogger<SuperAdminController> logger)
+        ILogger<SuperAdminController> logger,
+        IConfiguration configuration)
     {
         _companyService = companyService;
         _superAdminService = superAdminService;
         _pdfReportService = pdfReportService;
         _logger = logger;
+        _configuration = configuration;
     }
 
     private int GetCurrentUserId()
@@ -37,6 +40,19 @@ public class SuperAdminController : ControllerBase
     private string? GetClientIpAddress()
     {
         return HttpContext.Connection.RemoteIpAddress?.ToString();
+    }
+
+    private string GetCurrentUserEmail()
+    {
+        return User.FindFirst(ClaimTypes.Email)?.Value?.Trim() ?? string.Empty;
+    }
+
+    private string GetConfiguredBackupEmail()
+    {
+        var configured = _configuration["Security:EmergencyAdmin:BackupSuperAdminEmail"];
+        return string.IsNullOrWhiteSpace(configured)
+            ? string.Empty
+            : configured.Trim().ToLowerInvariant();
     }
 
     // ========================
@@ -618,6 +634,80 @@ public class SuperAdminController : ControllerBase
             _logger.LogError(ex, "Failed to generate Super Admin PDF report.");
             return StatusCode(500, "Failed to generate PDF report.");
         }
+    }
+
+    // ========================
+    // EMERGENCY SECURITY CONTROLS
+    // ========================
+
+    [HttpGet("security/status")]
+    public async Task<IActionResult> GetEmergencySecurityStatus()
+    {
+        var result = await _superAdminService.GetEmergencyAdminStatusAsync();
+        if (!result.Success)
+        {
+            return BadRequest(new { success = false, message = result.ErrorMessage });
+        }
+
+        return Ok(new { success = true, data = result });
+    }
+
+    [HttpPost("security/suspend-primary")]
+    public async Task<IActionResult> SuspendPrimarySuperAdmin([FromBody] EmergencySuperAdminActionRequest? request)
+    {
+        if (request == null)
+        {
+            return BadRequest(new { success = false, message = "Invalid request." });
+        }
+
+        var userId = GetCurrentUserId();
+        if (userId == 0)
+        {
+            return BadRequest(new { success = false, message = "Unable to identify current super admin." });
+        }
+
+        var callerEmail = GetCurrentUserEmail().ToLowerInvariant();
+        if (!string.Equals(callerEmail, GetConfiguredBackupEmail(), StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { success = false, message = "Only the backup super admin can perform this action." });
+        }
+
+        var result = await _superAdminService.SuspendPrimarySuperAdminAsync(userId, callerEmail, request, GetClientIpAddress());
+        if (!result.Success)
+        {
+            return BadRequest(new { success = false, message = result.ErrorMessage });
+        }
+
+        return Ok(new { success = true, message = "Primary super admin has been suspended." });
+    }
+
+    [HttpPost("security/reactivate-primary")]
+    public async Task<IActionResult> ReactivatePrimarySuperAdmin([FromBody] EmergencySuperAdminActionRequest? request)
+    {
+        if (request == null)
+        {
+            return BadRequest(new { success = false, message = "Invalid request." });
+        }
+
+        var userId = GetCurrentUserId();
+        if (userId == 0)
+        {
+            return BadRequest(new { success = false, message = "Unable to identify current super admin." });
+        }
+
+        var callerEmail = GetCurrentUserEmail().ToLowerInvariant();
+        if (!string.Equals(callerEmail, GetConfiguredBackupEmail(), StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { success = false, message = "Only the backup super admin can perform this action." });
+        }
+
+        var result = await _superAdminService.ReactivatePrimarySuperAdminAsync(userId, callerEmail, request, GetClientIpAddress());
+        if (!result.Success)
+        {
+            return BadRequest(new { success = false, message = result.ErrorMessage });
+        }
+
+        return Ok(new { success = true, message = "Primary super admin has been reactivated." });
     }
 
     // ========================

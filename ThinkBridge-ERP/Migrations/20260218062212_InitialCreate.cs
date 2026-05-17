@@ -945,16 +945,6 @@ namespace ThinkBridge_ERP.Migrations
                     { 4, "Monthly", true, null, null, "Enterprise", 4999.00m }
                 });
 
-            migrationBuilder.InsertData(
-                table: "User",
-                columns: new[] { "UserID", "AvatarUrl", "CompanyID", "CreatedAt", "Email", "Fname", "IsSuperAdmin", "LastLoginAt", "Lname", "MustChangePassword", "Password", "Phone", "Status" },
-                values: new object[] { 1, null, null, new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc), "superadmin@thinkbridge.com", "Super", true, null, "Admin", false, "$2a$11$rBNp5FPE0R8vFS9jVR5FUuKZKYgJMZJYpZB9CKrqX7YNCX7mQBbKG", null, "Active" });
-
-            migrationBuilder.InsertData(
-                table: "UserRole",
-                columns: new[] { "UserRoleID", "AssignedAt", "RoleID", "UserID" },
-                values: new object[] { 1, new DateTime(2024, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc), 1, 1 });
-
             migrationBuilder.CreateIndex(
                 name: "IX_AuditLog_CompanyID",
                 table: "AuditLog",

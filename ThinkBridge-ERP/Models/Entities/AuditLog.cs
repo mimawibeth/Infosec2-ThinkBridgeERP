@@ -28,6 +28,10 @@ public class AuditLog
     [StringLength(45)]
     public string? IPAddress { get; set; }
 
+    [Required]
+    [StringLength(20)]
+    public string LogType { get; set; } = "System";
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation properties

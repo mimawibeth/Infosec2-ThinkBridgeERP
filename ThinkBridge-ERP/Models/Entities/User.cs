@@ -50,6 +50,23 @@ public class User
 
     public DateTime? LockoutEnd { get; set; }
 
+    public int LockoutLevel { get; set; } = 0;
+
+    public bool IsPermanentlyLocked { get; set; } = false;
+
+    public DateTime? PermanentlyLockedAt { get; set; }
+
+    public bool IsTotpEnabled { get; set; } = false;
+
+    [StringLength(128)]
+    public string? TotpSecret { get; set; }
+
+    public string? TotpBackupCodes { get; set; }
+
+    public int TotpFailedAttempts { get; set; } = 0;
+
+    public DateTime? TotpLockoutUntil { get; set; }
+
     public DateTime? LastLoginAt { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

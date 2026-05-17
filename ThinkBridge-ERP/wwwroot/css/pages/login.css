@@ -212,6 +212,17 @@
     gap: 8px;
 }
 
+.captcha-group {
+    align-items: center;
+    margin-top: -4px;
+}
+
+.turnstile-widget {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+}
+
 .form-group label {
     font-size: 0.875rem;
     font-weight: 500;
@@ -464,6 +475,128 @@
     font-weight: 500;
 }
 
+.renew-subscription-cta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: rgba(11, 79, 108, 0.04);
+}
+
+.renew-cta-text {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+.renew-subscription-cta .btn {
+    padding: 8px 14px;
+    font-size: 0.85rem;
+}
+
+.mfa-step {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    background: rgba(11, 79, 108, 0.03);
+}
+
+.mfa-header {
+    margin-bottom: 12px;
+}
+
+.mfa-header h3 {
+    margin: 0 0 6px 0;
+    font-size: 0.95rem;
+    color: var(--text-primary);
+}
+
+.mfa-header p {
+    margin: 0;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+}
+
+.mfa-enrollment {
+    margin-bottom: 12px;
+    padding: 10px;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    background: #fff;
+}
+
+.mfa-enrollment-grid {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: 12px;
+    align-items: center;
+}
+
+.mfa-qr-wrap {
+    width: 120px;
+    height: 120px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    background: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#mfaQrImage {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.mfa-secret-label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.mfa-setup-note {
+    margin: 8px 0 0 0;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+.mfa-manual-toggle {
+    margin-top: 8px;
+}
+
+#mfaManualKeyWrap {
+    margin-top: 8px;
+}
+
+.mfa-links {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.link-button {
+    border: none;
+    background: transparent;
+    color: var(--primary-blue);
+    font-size: 0.82rem;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+.link-button:hover {
+    color: var(--blue-dark);
+}
+
 /* Readonly Input */
 .form-input[readonly] {
     background-color: var(--background);
@@ -518,6 +651,14 @@
         left: 10px;
         padding: 5px 10px;
         font-size: 0.7rem;
+    }
+
+    .mfa-enrollment-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .mfa-qr-wrap {
+        margin: 0 auto;
     }
 }
 

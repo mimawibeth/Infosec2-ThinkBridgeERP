@@ -213,6 +213,19 @@
                     <input type="text" id="article-tags" class="form-input"
                            placeholder="e.g. api, integration, tutorial (comma-separated)" />
                 </div>
+
+                <div class="form-group">
+                    <label>References / Sources</label>
+                    <p class="form-hint kb-reference-hint">Use references when your article is based on studies, standards, or third-party guidance.</p>
+                    <div id="article-references-list" class="article-references-list"></div>
+                    <button type="button" class="btn btn-sm btn-secondary kb-add-reference-btn" id="add-reference-btn">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                        Add Reference
+                    </button>
+                </div>
             </form>
         </div>
         <div class="modal-footer">
@@ -289,6 +302,10 @@
             <div class="detail-section" id="view-article-tags-section">
                 <h4 class="detail-section-title">Tags</h4>
                 <div class="tag-list" id="view-article-tags"></div>
+            </div>
+            <div class="detail-section" id="view-article-references-section">
+                <h4 class="detail-section-title">References</h4>
+                <div class="kb-references-list" id="view-article-references"></div>
             </div>
             <div class="detail-section kb-comments-section">
                 <h4 class="detail-section-title">

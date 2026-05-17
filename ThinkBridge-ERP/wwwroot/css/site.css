@@ -1497,6 +1497,77 @@ tr:hover {
   color: rgba(255, 255, 255, 0.8);
 }
 
+/* Session Inactivity Modal */
+.session-timeout-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(3, 20, 30, 0.58);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2100;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--transition-fast), visibility var(--transition-fast);
+}
+
+.session-timeout-overlay.active {
+  opacity: 1;
+  visibility: visible;
+}
+
+.session-timeout-modal {
+  transform: scale(0.92);
+  transition: transform var(--transition-fast);
+}
+
+.session-timeout-overlay.active .session-timeout-modal {
+  transform: scale(1);
+}
+
+.session-timeout-message {
+  font-size: 0.95rem;
+  color: var(--text-primary);
+  margin-bottom: var(--spacing-sm);
+}
+
+.session-timeout-countdown {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.session-timeout-countdown strong {
+  color: var(--danger);
+  font-family: var(--font-mono);
+  letter-spacing: 0.3px;
+}
+
+.session-timeout-actions {
+  justify-content: flex-end;
+}
+
+@media (max-width: 576px) {
+  .session-timeout-overlay {
+    padding: var(--spacing-md);
+  }
+
+  .session-timeout-modal {
+    max-width: 100%;
+  }
+
+  .session-timeout-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .session-timeout-actions .btn {
+    width: 100%;
+  }
+}
+
 /* View/Display Mode Styles */
 .detail-section {
   margin-bottom: var(--spacing-lg);

@@ -36,15 +36,22 @@ public class PayMongoService : IPayMongoService
     {
         try
         {
-            var secretKey = _config["PayMongo:SecretKey"];
+            var secretKey = GetPayMongoSecretKey();
             if (string.IsNullOrEmpty(secretKey))
             {
+                _logger.LogWarning(
+                    "PayMongo SecretKey not configured. Environment={Environment}. Expected config key PayMongo:SecretKey (User Secrets/appsettings.Development.json) or env vars PayMongo__SecretKey/PAYMONGO_SECRET_KEY.",
+                    _config["ASPNETCORE_ENVIRONMENT"] ?? _config["DOTNET_ENVIRONMENT"] ?? "(unknown)");
                 return new PayMongoCheckoutResult
                 {
                     Success = false,
-                    ErrorMessage = "PayMongo is not configured."
+                    ErrorMessage = "PayMongo is not configured. Set PayMongo:SecretKey (User Secrets / appsettings.Development.json) or env var PayMongo__SecretKey / PAYMONGO_SECRET_KEY."
                 };
             }
+
+            _logger.LogInformation(
+                "PayMongo SecretKey configured (masked). Environment={Environment}.",
+                _config["ASPNETCORE_ENVIRONMENT"] ?? _config["DOTNET_ENVIRONMENT"] ?? "(unknown)");
 
             var client = _httpClientFactory.CreateClient();
             var authToken = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{secretKey}:"));
@@ -53,10 +60,34 @@ public class PayMongoService : IPayMongoService
             // Amount in centavos (PHP cents)
             var amountInCentavos = (int)(request.Amount * 100);
 
-            // Build redirect URLs from the request's base URL so they work in any environment
-            var baseUrl = request.BaseUrl.TrimEnd('/');
-            var successUrl = $"{baseUrl}/Subscription/PaymentSuccess";
-            var cancelUrl = $"{baseUrl}/Subscription/PaymentCancelled";
+            // Redirect URLs
+            // Prefer explicit configuration (PayMongo:SuccessUrl/CancelUrl) so local dev can force https://localhost:7009.
+            // Fallback to request.BaseUrl so it works in any environment.
+            var configuredSuccessUrl = _config["PayMongo:SuccessUrl"];
+            var configuredCancelUrl = _config["PayMongo:CancelUrl"];
+
+            string successUrl;
+            string cancelUrl;
+            if (!string.IsNullOrWhiteSpace(configuredSuccessUrl) && !string.IsNullOrWhiteSpace(configuredCancelUrl))
+            {
+                successUrl = configuredSuccessUrl.TrimEnd('/');
+                cancelUrl = configuredCancelUrl.TrimEnd('/');
+            }
+            else
+            {
+                var baseUrl = (request.BaseUrl ?? string.Empty).TrimEnd('/');
+                if (string.IsNullOrWhiteSpace(baseUrl))
+                {
+                    return new PayMongoCheckoutResult
+                    {
+                        Success = false,
+                        ErrorMessage = "Payment redirect URL is not configured. Set PayMongo:SuccessUrl/CancelUrl or provide a valid BaseUrl."
+                    };
+                }
+
+                successUrl = $"{baseUrl}/Subscription/PaymentSuccess";
+                cancelUrl = $"{baseUrl}/Subscription/PaymentCancelled";
+            }
 
             var payload = new
             {
@@ -79,8 +110,8 @@ public class PayMongoService : IPayMongoService
                             }
                         },
                         payment_method_types = new[] { "gcash", "grab_pay", "card", "paymaya" },
-                        success_url = $"{successUrl}?subscription_id={request.SubscriptionId}",
-                        cancel_url = $"{cancelUrl}?subscription_id={request.SubscriptionId}",
+                        success_url = AppendQuery(successUrl, "subscription_id", request.SubscriptionId.ToString()),
+                        cancel_url = AppendQuery(cancelUrl, "subscription_id", request.SubscriptionId.ToString()),
                         metadata = new
                         {
                             subscription_id = request.SubscriptionId.ToString(),
@@ -163,6 +194,21 @@ public class PayMongoService : IPayMongoService
                 ErrorMessage = "Payment system error. Please try again later."
             };
         }
+    }
+
+    private string? GetPayMongoSecretKey()
+    {
+        return _config["PayMongo:SecretKey"]
+            ?? _config["PAYMONGO_SECRET_KEY"]
+            ?? _config["PAYMONGO_SECRETKEY"]
+            ?? _config["PAYMONGO_SECRET"];
+    }
+
+    private static string AppendQuery(string url, string key, string value)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return url;
+        var separator = url.Contains('?') ? "&" : "?";
+        return $"{url}{separator}{Uri.EscapeDataString(key)}={Uri.EscapeDataString(value)}";
     }
 
     /// <summary>

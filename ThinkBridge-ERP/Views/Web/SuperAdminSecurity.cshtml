@@ -1,0 +1,489 @@
+@{
+    ViewData["Title"] = "Security";
+    ViewData["UserRole"] = "superadmin";
+    var isBackupEmergencyAdmin = (ViewData["IsBackupEmergencyAdmin"] as bool?) ?? false;
+}
+
+@section PageStyles {
+    <link rel="stylesheet" href="~/css/pages/dashboard.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/css/pages/superadmin.css" asp-append-version="true" />
+    <style>
+        .security-page {
+            display: grid;
+            gap: 1.2rem;
+        }
+
+        .security-card {
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 14px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+            padding: 1.25rem;
+        }
+
+        .security-card h2 {
+            margin: 0;
+            font-size: 1.2rem;
+            color: #0f172a;
+        }
+
+        .security-muted {
+            color: #64748b;
+            margin: 0.35rem 0 0;
+        }
+
+        .security-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+
+        .status-item {
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 0.75rem;
+            background: #f8fafc;
+        }
+
+        .status-label {
+            display: block;
+            font-size: 0.78rem;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .status-value {
+            display: block;
+            margin-top: 0.35rem;
+            font-size: 0.98rem;
+            color: #0f172a;
+            font-weight: 600;
+            word-break: break-word;
+        }
+
+        .status-value.bad {
+            color: #b91c1c;
+        }
+
+        .status-value.good {
+            color: #166534;
+        }
+
+        .danger-zone {
+            border: 1px solid #fecaca;
+            background: #fff1f2;
+            border-radius: 12px;
+            padding: 0.95rem;
+            margin-top: 1rem;
+        }
+
+        .danger-title {
+            margin: 0;
+            color: #9f1239;
+            font-size: 0.95rem;
+            font-weight: 700;
+        }
+
+        .danger-desc {
+            margin: 0.45rem 0 0;
+            color: #881337;
+            font-size: 0.9rem;
+        }
+
+        .security-actions {
+            margin-top: 1rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+        }
+
+        .security-btn {
+            border: none;
+            border-radius: 10px;
+            padding: 0.7rem 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .security-btn:disabled {
+            opacity: 0.65;
+            cursor: not-allowed;
+        }
+
+        .security-btn.danger {
+            background: #be123c;
+            color: #fff;
+        }
+
+        .security-btn.safe {
+            background: #0f766e;
+            color: #fff;
+        }
+
+        .security-message {
+            margin-top: 0.9rem;
+            border-radius: 10px;
+            padding: 0.75rem 0.9rem;
+            font-size: 0.92rem;
+            display: none;
+        }
+
+        .security-message.error {
+            display: block;
+            color: #7f1d1d;
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+        }
+
+        .security-message.success {
+            display: block;
+            color: #14532d;
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+        }
+
+        .security-modal-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(2, 6, 23, 0.6);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1200;
+            padding: 1rem;
+        }
+
+        .security-modal {
+            width: min(580px, 100%);
+            background: #fff;
+            border-radius: 14px;
+            padding: 1rem;
+            box-shadow: 0 20px 40px rgba(2, 6, 23, 0.3);
+        }
+
+        .security-modal h3 {
+            margin-top: 0;
+            color: #0f172a;
+        }
+
+        .field-group {
+            margin-bottom: 0.75rem;
+        }
+
+        .field-group label {
+            display: block;
+            font-size: 0.84rem;
+            color: #334155;
+            margin-bottom: 0.3rem;
+        }
+
+        .field-group input,
+        .field-group textarea {
+            width: 100%;
+            border: 1px solid #cbd5e1;
+            border-radius: 10px;
+            padding: 0.6rem 0.7rem;
+            font-size: 0.9rem;
+        }
+
+        .modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.6rem;
+            margin-top: 0.8rem;
+        }
+
+        .modal-cancel {
+            border: 1px solid #cbd5e1;
+            background: #fff;
+            color: #0f172a;
+        }
+    </style>
+}
+
+<div class="page-dashboard superadmin-dashboard security-page">
+    <section class="welcome-section">
+        <h1 class="welcome-title">Emergency Security Control</h1>
+        @if (isBackupEmergencyAdmin)
+        {
+            <p class="welcome-subtitle">Backup super admin access: suspend or recover primary super admin access.</p>
+        }
+        else
+        {
+            <p class="welcome-subtitle">Read-only security status. Emergency controls are restricted to the backup super admin.</p>
+        }
+    </section>
+
+    <section class="security-card">
+        <h2>Primary Super Admin Security Status</h2>
+        <p class="security-muted">Review the live account state before triggering emergency controls.</p>
+
+        <div class="security-grid">
+            <div class="status-item">
+                <span class="status-label">Primary Email</span>
+                <span class="status-value" id="primary-email">Loading...</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Backup Email</span>
+                <span class="status-value" id="backup-email">Loading...</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Primary Status</span>
+                <span class="status-value" id="primary-status">Loading...</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Last Emergency Action (UTC)</span>
+                <span class="status-value" id="last-action-at">-</span>
+            </div>
+        </div>
+
+        @if (isBackupEmergencyAdmin)
+        {
+            <div class="danger-zone">
+                <p class="danger-title">Danger Zone</p>
+                <p class="danger-desc">Use this only when there is credible compromise risk. All actions are logged as security events.</p>
+                <div class="security-actions">
+                    <button class="security-btn danger" id="open-suspend-modal" type="button">Suspend Primary Super Admin</button>
+                    <button class="security-btn safe" id="open-reactivate-modal" type="button">Reactivate Primary Super Admin</button>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="danger-zone">
+                <p class="danger-title">Action Restricted</p>
+                <p class="danger-desc">Only the configured backup super admin can execute emergency suspend/reactivate actions.</p>
+            </div>
+        }
+
+        <div id="security-message" class="security-message"></div>
+    </section>
+</div>
+
+@if (isBackupEmergencyAdmin)
+{
+    <div class="security-modal-backdrop" id="security-modal-backdrop" aria-hidden="true">
+        <div class="security-modal" role="dialog" aria-modal="true" aria-labelledby="security-modal-title">
+            <h3 id="security-modal-title">Emergency Action</h3>
+            <p class="security-muted" id="security-modal-subtitle"></p>
+
+            <div class="field-group">
+                <label for="security-confirmation">Type confirmation phrase exactly</label>
+                <input id="security-confirmation" type="text" autocomplete="off" />
+            </div>
+
+            <div class="field-group">
+                <label for="security-reason">Reason</label>
+                <textarea id="security-reason" rows="3" maxlength="250" placeholder="Describe why this emergency action is required."></textarea>
+            </div>
+
+            <div class="field-group">
+                <label for="security-password">Step-up: Backup current password (optional if valid TOTP is entered)</label>
+                <input id="security-password" type="password" autocomplete="current-password" />
+            </div>
+
+            <div class="field-group">
+                <label for="security-totp">Step-up: Authenticator code (optional if valid password is entered)</label>
+                <input id="security-totp" type="text" maxlength="12" autocomplete="one-time-code" />
+            </div>
+
+            <div class="modal-actions">
+                <button class="security-btn modal-cancel" id="security-cancel" type="button">Cancel</button>
+                <button class="security-btn danger" id="security-submit" type="button">Confirm Action</button>
+            </div>
+        </div>
+    </div>
+}
+
+@section PageScripts {
+    <script>
+        (function () {
+            const canExecuteEmergencyActions = @Html.Raw(isBackupEmergencyAdmin ? "true" : "false");
+            const state = {
+                mode: null,
+                expectedPhrase: '',
+                loading: false
+            };
+
+            const statusEls = {
+                primaryEmail: document.getElementById('primary-email'),
+                backupEmail: document.getElementById('backup-email'),
+                primaryStatus: document.getElementById('primary-status'),
+                lastActionAt: document.getElementById('last-action-at')
+            };
+
+            const messageEl = document.getElementById('security-message');
+            const backdrop = canExecuteEmergencyActions ? document.getElementById('security-modal-backdrop') : null;
+            const modalTitle = canExecuteEmergencyActions ? document.getElementById('security-modal-title') : null;
+            const modalSubtitle = canExecuteEmergencyActions ? document.getElementById('security-modal-subtitle') : null;
+            const confirmationInput = canExecuteEmergencyActions ? document.getElementById('security-confirmation') : null;
+            const reasonInput = canExecuteEmergencyActions ? document.getElementById('security-reason') : null;
+            const passwordInput = canExecuteEmergencyActions ? document.getElementById('security-password') : null;
+            const totpInput = canExecuteEmergencyActions ? document.getElementById('security-totp') : null;
+            const submitBtn = canExecuteEmergencyActions ? document.getElementById('security-submit') : null;
+            const suspendBtn = canExecuteEmergencyActions ? document.getElementById('open-suspend-modal') : null;
+            const reactivateBtn = canExecuteEmergencyActions ? document.getElementById('open-reactivate-modal') : null;
+
+            function showMessage(type, text) {
+                messageEl.className = 'security-message ' + type;
+                messageEl.textContent = text;
+            }
+
+            function clearMessage() {
+                messageEl.className = 'security-message';
+                messageEl.textContent = '';
+            }
+
+            function closeModal() {
+                if (!canExecuteEmergencyActions || !backdrop || !confirmationInput || !reasonInput || !passwordInput || !totpInput) {
+                    return;
+                }
+
+                backdrop.style.display = 'none';
+                backdrop.setAttribute('aria-hidden', 'true');
+                state.mode = null;
+                confirmationInput.value = '';
+                reasonInput.value = '';
+                passwordInput.value = '';
+                totpInput.value = '';
+            }
+
+            function openModal(mode) {
+                if (!canExecuteEmergencyActions || !backdrop || !modalTitle || !modalSubtitle || !submitBtn) {
+                    return;
+                }
+
+                state.mode = mode;
+                clearMessage();
+                backdrop.style.display = 'flex';
+                backdrop.setAttribute('aria-hidden', 'false');
+
+                if (mode === 'suspend') {
+                    modalTitle.textContent = 'Suspend Primary Super Admin';
+                    modalSubtitle.textContent = 'This immediately blocks primary super admin access and marks the account for controlled recovery.';
+                    submitBtn.textContent = 'Suspend Primary';
+                    submitBtn.className = 'security-btn danger';
+                } else {
+                    modalTitle.textContent = 'Reactivate Primary Super Admin';
+                    modalSubtitle.textContent = 'This restores access but keeps must-change-password enabled for controlled recovery.';
+                    submitBtn.textContent = 'Reactivate Primary';
+                    submitBtn.className = 'security-btn safe';
+                }
+            }
+
+            function setBusy(isBusy) {
+                state.loading = isBusy;
+                if (canExecuteEmergencyActions && submitBtn && suspendBtn && reactivateBtn) {
+                    submitBtn.disabled = isBusy;
+                    suspendBtn.disabled = isBusy;
+                    reactivateBtn.disabled = isBusy;
+                }
+            }
+
+            async function loadStatus() {
+                try {
+                    const response = await fetch('/api/superadmin/security/status', { credentials: 'same-origin' });
+                    const payload = await response.json();
+
+                    if (!response.ok || !payload.success) {
+                        throw new Error(payload.message || 'Unable to load security status.');
+                    }
+
+                    const data = payload.data;
+                    state.expectedPhrase = data.expectedConfirmationPhrase || '';
+
+                    statusEls.primaryEmail.textContent = data.primarySuperAdminEmail || '-';
+                    statusEls.backupEmail.textContent = data.backupSuperAdminEmail || '-';
+                    statusEls.primaryStatus.textContent = data.primaryStatus || '-';
+                    statusEls.primaryStatus.className = 'status-value ' + (data.isPrimarySuspended ? 'bad' : 'good');
+                    statusEls.lastActionAt.textContent = data.lastEmergencyActionAt
+                        ? new Date(data.lastEmergencyActionAt + 'Z').toISOString().replace('T', ' ').replace('.000Z', ' UTC')
+                        : '-';
+                } catch (err) {
+                    showMessage('error', err.message || 'Unable to load security status.');
+                }
+            }
+
+            async function submitAction() {
+                if (!canExecuteEmergencyActions || state.loading || !state.mode || !reasonInput || !confirmationInput || !passwordInput || !totpInput) {
+                    return;
+                }
+
+                const reason = reasonInput.value.trim();
+                const confirmationPhrase = confirmationInput.value.trim();
+                const currentPassword = passwordInput.value;
+                const totpCode = totpInput.value.trim();
+
+                if (!confirmationPhrase) {
+                    showMessage('error', 'Confirmation phrase is required.');
+                    return;
+                }
+
+                if (!reason || reason.length < 8) {
+                    showMessage('error', 'Please provide a reason with at least 8 characters.');
+                    return;
+                }
+
+                if (!currentPassword && !totpCode) {
+                    showMessage('error', 'Provide backup password or authenticator code for step-up verification.');
+                    return;
+                }
+
+                setBusy(true);
+                try {
+                    const endpoint = state.mode === 'suspend'
+                        ? '/api/superadmin/security/suspend-primary'
+                        : '/api/superadmin/security/reactivate-primary';
+
+                    const response = await fetch(endpoint, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({
+                            confirmationPhrase,
+                            reason,
+                            currentPassword: currentPassword || null,
+                            totpCode: totpCode || null
+                        })
+                    });
+
+                    const payload = await response.json();
+                    if (!response.ok || !payload.success) {
+                        throw new Error(payload.message || 'Action failed.');
+                    }
+
+                    closeModal();
+                    showMessage('success', payload.message || 'Emergency action completed successfully.');
+                    await loadStatus();
+                } catch (err) {
+                    showMessage('error', err.message || 'Action failed.');
+                } finally {
+                    setBusy(false);
+                }
+            }
+
+            if (canExecuteEmergencyActions && suspendBtn && reactivateBtn && submitBtn && backdrop) {
+                suspendBtn.addEventListener('click', function () {
+                    openModal('suspend');
+                });
+
+                reactivateBtn.addEventListener('click', function () {
+                    openModal('reactivate');
+                });
+
+                document.getElementById('security-cancel').addEventListener('click', closeModal);
+                submitBtn.addEventListener('click', submitAction);
+
+                backdrop.addEventListener('click', function (event) {
+                    if (event.target === backdrop) {
+                        closeModal();
+                    }
+                });
+            }
+
+            loadStatus();
+        })();
+    </script>
+}

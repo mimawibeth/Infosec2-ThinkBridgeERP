@@ -7,6 +7,7 @@
 
     let profileData = null;      // cached profile from API
     let originalProfile = null;  // snapshot for cancel/dirty check
+    let lastBackupCodes = [];
 
     // ------------------------------------------
     // Init
@@ -16,6 +17,8 @@
         loadProfile();
         bindProfileActions();
         bindPasswordActions();
+        bindTotpActions();
+        loadTotpStatus();
         initThemeSelector();
         initAvatarColorPicker();
     });
@@ -258,6 +261,280 @@
         resetPasswordChecklist();
         const hint = document.getElementById('password-match-hint');
         if (hint) { hint.style.display = 'none'; hint.textContent = ''; }
+    }
+
+    // ------------------------------------------
+    // TOTP Security
+    // ------------------------------------------
+    function bindTotpActions() {
+        document.getElementById('btn-start-totp-setup')?.addEventListener('click', startTotpSetup);
+        document.getElementById('btn-verify-totp-setup')?.addEventListener('click', verifyTotpSetup);
+        document.getElementById('btn-show-totp-manual-key')?.addEventListener('click', toggleTotpManualKey);
+        document.getElementById('btn-show-backup-codes')?.addEventListener('click', toggleBackupCodesPanel);
+        document.getElementById('btn-copy-backup-codes')?.addEventListener('click', copyBackupCodes);
+
+        document.getElementById('btn-show-regenerate-backup-form')?.addEventListener('click', function () {
+            toggleSensitivePanel('totp-regenerate-form', true);
+        });
+        document.getElementById('btn-cancel-regenerate-backup')?.addEventListener('click', function () {
+            toggleSensitivePanel('totp-regenerate-form', false);
+        });
+        document.getElementById('btn-regenerate-backup-codes')?.addEventListener('click', regenerateBackupCodes);
+
+        document.getElementById('btn-show-disable-totp-form')?.addEventListener('click', function () {
+            toggleSensitivePanel('totp-disable-form', true);
+        });
+        document.getElementById('btn-cancel-disable-totp')?.addEventListener('click', function () {
+            toggleSensitivePanel('totp-disable-form', false);
+        });
+        document.getElementById('btn-disable-totp')?.addEventListener('click', disableTotp);
+    }
+
+    async function loadTotpStatus() {
+        try {
+            const res = await fetch('/api/settings/totp/status');
+            const result = await res.json();
+            if (!res.ok) {
+                throw new Error(result.message || 'Failed to load TOTP status.');
+            }
+
+            renderTotpStatus(result);
+        } catch (err) {
+            renderTotpStatus({ isEnabled: false, isPendingSetup: false, hasBackupCodes: false, lockoutSeconds: 0 });
+            showToast(err.message || 'Failed to load TOTP status.', 'error');
+        }
+    }
+
+    function renderTotpStatus(status) {
+        const badge = document.getElementById('totp-status-badge');
+        const hint = document.getElementById('totp-status-hint');
+        const disabledPanel = document.getElementById('totp-disabled-panel');
+        const enabledPanel = document.getElementById('totp-enabled-panel');
+        const setupPanel = document.getElementById('totp-setup-panel');
+
+        if (!badge || !hint || !disabledPanel || !enabledPanel || !setupPanel) {
+            return;
+        }
+
+        setupPanel.style.display = 'none';
+        resetTotpManualKeyVisibility();
+        toggleSensitivePanel('totp-regenerate-form', false);
+        toggleSensitivePanel('totp-disable-form', false);
+
+        if (status.isEnabled) {
+            badge.textContent = 'Enabled';
+            badge.className = 'status-badge status-active';
+            hint.textContent = status.lockoutSeconds > 0
+                ? `Temporarily locked for ${Math.ceil(status.lockoutSeconds / 60)} minute(s).`
+                : 'Your account requires an authenticator code during login.';
+
+            disabledPanel.style.display = 'none';
+            enabledPanel.style.display = '';
+        } else {
+            badge.textContent = status.isPendingSetup ? 'Setup In Progress' : 'Disabled';
+            badge.className = 'status-badge status-inactive';
+            hint.textContent = 'Enable TOTP to protect your account with an extra login step.';
+
+            disabledPanel.style.display = '';
+            enabledPanel.style.display = 'none';
+        }
+    }
+
+    async function startTotpSetup() {
+        try {
+            const res = await fetch('/api/settings/totp/setup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+
+            const result = await res.json();
+            if (!res.ok) {
+                throw new Error(result.message || 'Unable to start TOTP setup.');
+            }
+
+            const setupPanel = document.getElementById('totp-setup-panel');
+            const manualKey = document.getElementById('totp-manual-key');
+            const qrImage = document.getElementById('totp-qr-image');
+
+            manualKey.value = result.secret || '';
+            qrImage.src = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(result.provisioningUri || '')}`;
+            setupPanel.style.display = '';
+            resetTotpManualKeyVisibility();
+            document.getElementById('totp-setup-code').focus();
+            showToast('Scan the QR code and verify using your authenticator app.', 'info');
+        } catch (err) {
+            showToast(err.message || 'Unable to start TOTP setup.', 'error');
+        }
+    }
+
+    function toggleTotpManualKey() {
+        const wrap = document.getElementById('totp-manual-key-wrap');
+        const toggle = document.getElementById('btn-show-totp-manual-key');
+        if (!wrap || !toggle) return;
+
+        const show = wrap.style.display === 'none';
+        wrap.style.display = show ? '' : 'none';
+        toggle.textContent = show
+            ? 'Hide manual key'
+            : "Can't scan QR? Enter key manually";
+    }
+
+    function resetTotpManualKeyVisibility() {
+        const wrap = document.getElementById('totp-manual-key-wrap');
+        const toggle = document.getElementById('btn-show-totp-manual-key');
+        if (!wrap || !toggle) return;
+
+        wrap.style.display = 'none';
+        toggle.textContent = "Can't scan QR? Enter key manually";
+    }
+
+    async function verifyTotpSetup() {
+        const code = document.getElementById('totp-setup-code').value.trim();
+        if (!code) {
+            showToast('Please enter your authenticator code.', 'error');
+            return;
+        }
+
+        try {
+            const res = await fetch('/api/settings/totp/verify-setup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code })
+            });
+
+            const result = await res.json();
+            if (!res.ok) {
+                throw new Error(result.message || 'Unable to verify setup code.');
+            }
+
+            lastBackupCodes = Array.isArray(result.backupCodes) ? result.backupCodes : [];
+            renderBackupCodes(lastBackupCodes);
+            document.getElementById('backup-codes-panel').style.display = '';
+            document.getElementById('totp-setup-code').value = '';
+
+            await loadTotpStatus();
+            showToast('Authenticator app enabled successfully.', 'success');
+        } catch (err) {
+            showToast(err.message || 'Unable to verify setup code.', 'error');
+        }
+    }
+
+    function toggleBackupCodesPanel() {
+        const panel = document.getElementById('backup-codes-panel');
+        if (!panel) return;
+
+        if (panel.style.display === 'none') {
+            if (!lastBackupCodes.length) {
+                showToast('No new backup codes to show. Regenerate codes to receive a fresh set.', 'info');
+                return;
+            }
+            panel.style.display = '';
+            return;
+        }
+
+        panel.style.display = 'none';
+    }
+
+    function renderBackupCodes(codes) {
+        const container = document.getElementById('backup-codes-grid');
+        if (!container) return;
+
+        container.innerHTML = '';
+        (codes || []).forEach(code => {
+            const item = document.createElement('div');
+            item.className = 'backup-code-item';
+            item.textContent = code;
+            container.appendChild(item);
+        });
+    }
+
+    async function copyBackupCodes() {
+        if (!lastBackupCodes.length) {
+            showToast('No backup codes available to copy.', 'error');
+            return;
+        }
+
+        try {
+            await navigator.clipboard.writeText(lastBackupCodes.join('\n'));
+            showToast('Backup codes copied to clipboard.', 'success');
+        } catch {
+            showToast('Unable to copy backup codes.', 'error');
+        }
+    }
+
+    function toggleSensitivePanel(panelId, show) {
+        const panel = document.getElementById(panelId);
+        if (!panel) return;
+
+        panel.style.display = show ? '' : 'none';
+        if (!show) {
+            panel.querySelectorAll('input').forEach(input => {
+                input.value = '';
+            });
+        }
+    }
+
+    async function regenerateBackupCodes() {
+        const currentPassword = document.getElementById('totp-regenerate-password').value;
+        const code = document.getElementById('totp-regenerate-code').value.trim();
+        if (!currentPassword || !code) {
+            showToast('Current password and verification code are required.', 'error');
+            return;
+        }
+
+        try {
+            const res = await fetch('/api/settings/totp/backup-codes/regenerate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ currentPassword, code })
+            });
+
+            const result = await res.json();
+            if (!res.ok) {
+                throw new Error(result.message || 'Unable to regenerate backup codes.');
+            }
+
+            lastBackupCodes = Array.isArray(result.backupCodes) ? result.backupCodes : [];
+            renderBackupCodes(lastBackupCodes);
+            document.getElementById('backup-codes-panel').style.display = '';
+            toggleSensitivePanel('totp-regenerate-form', false);
+
+            showToast('Backup codes regenerated.', 'success');
+        } catch (err) {
+            showToast(err.message || 'Unable to regenerate backup codes.', 'error');
+        }
+    }
+
+    async function disableTotp() {
+        const currentPassword = document.getElementById('totp-disable-password').value;
+        const code = document.getElementById('totp-disable-code').value.trim();
+        if (!currentPassword || !code) {
+            showToast('Current password and verification code are required.', 'error');
+            return;
+        }
+
+        try {
+            const res = await fetch('/api/settings/totp/disable', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ currentPassword, code })
+            });
+
+            const result = await res.json();
+            if (!res.ok) {
+                throw new Error(result.message || 'Unable to disable authenticator app.');
+            }
+
+            lastBackupCodes = [];
+            renderBackupCodes(lastBackupCodes);
+            document.getElementById('backup-codes-panel').style.display = 'none';
+            toggleSensitivePanel('totp-disable-form', false);
+            await loadTotpStatus();
+
+            showToast(result.message || 'Authenticator app disabled.', 'success');
+        } catch (err) {
+            showToast(err.message || 'Unable to disable authenticator app.', 'error');
+        }
     }
 
     // ------------------------------------------

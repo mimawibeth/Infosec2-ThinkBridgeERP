@@ -10,11 +10,13 @@ public class SuperAdminService : ISuperAdminService
 {
     private readonly ApplicationDbContext _context;
     private readonly ILogger<SuperAdminService> _logger;
+    private readonly IConfiguration _configuration;
 
-    public SuperAdminService(ApplicationDbContext context, ILogger<SuperAdminService> logger)
+    public SuperAdminService(ApplicationDbContext context, ILogger<SuperAdminService> logger, IConfiguration configuration)
     {
         _context = context;
         _logger = logger;
+        _configuration = configuration;
     }
 
     // ========================
@@ -270,10 +272,15 @@ public class SuperAdminService : ISuperAdminService
 
                 _context.Subscriptions.Add(subscription);
 
-                // If status is Active, ensure company is also Active
+                // If status is Active, ensure company and users can access the system
                 if (request.Status == "Active" && company.Status != "Active")
                 {
                     company.Status = "Active";
+                }
+
+                if (request.Status is "Active" or "Trial" or "GracePeriod")
+                {
+                    await CompanyUserStatusSync.ApplyForCompanyStatusAsync(_context, request.CompanyID, "Active");
                 }
 
                 await _context.SaveChangesAsync();
@@ -333,14 +340,16 @@ public class SuperAdminService : ISuperAdminService
                     changes.Add($"status from {subscription.Status} to {request.Status}");
                     subscription.Status = request.Status;
 
-                    // Sync company status based on subscription status
+                    // Sync company and user access based on subscription status
                     if (request.Status == "Cancelled" || request.Status == "Expired")
                     {
                         subscription.Company.Status = "Suspended";
+                        await CompanyUserStatusSync.ApplyForCompanyStatusAsync(_context, subscription.CompanyID, "Suspended");
                     }
-                    else if (request.Status == "Active")
+                    else if (request.Status == "Active" || request.Status == "Trial" || request.Status == "GracePeriod")
                     {
                         subscription.Company.Status = "Active";
+                        await CompanyUserStatusSync.ApplyForCompanyStatusAsync(_context, subscription.CompanyID, "Active");
                     }
 
                     // Sync related payment status
@@ -495,15 +504,7 @@ public class SuperAdminService : ISuperAdminService
                     payment.Status = "Cancelled";
                 }
 
-                // Deactivate company users
-                var companyUsers = await _context.Users
-                    .Where(u => u.CompanyID == subscription.CompanyID)
-                    .ToListAsync();
-
-                foreach (var user in companyUsers)
-                {
-                    user.Status = "Inactive";
-                }
+                await CompanyUserStatusSync.ApplyForCompanyStatusAsync(_context, subscription.CompanyID, "Suspended");
 
                 await _context.SaveChangesAsync();
 
@@ -829,6 +830,7 @@ public class SuperAdminService : ISuperAdminService
                     subscription.Status = "Active";
                     subscription.EndDate = DateTime.UtcNow.AddMonths(1);
                     subscription.Company.Status = "Active";
+                    await CompanyUserStatusSync.ApplyForCompanyStatusAsync(_context, subscription.CompanyID, "Active");
                 }
 
                 await _context.SaveChangesAsync();
@@ -970,6 +972,365 @@ public class SuperAdminService : ISuperAdminService
             _logger.LogError(ex, "Error logging audit action: {Action}", action);
         }
     }
+
+    // ========================
+    // EMERGENCY ADMIN SECURITY CONTROLS
+    // ========================
+
+    public async Task<EmergencyAdminStatusResult> GetEmergencyAdminStatusAsync()
+    {
+        try
+        {
+            var settings = GetEmergencyAdminSettings();
+            var normalizedPrimaryEmail = NormalizeEmail(settings.PrimarySuperAdminEmail);
+
+            var primary = await _context.Users
+                .AsNoTracking()
+                .FirstOrDefaultAsync(u => u.Email.ToLower() == normalizedPrimaryEmail);
+
+            var primaryUserId = primary?.UserID;
+            var lastActionAt = primaryUserId.HasValue
+                ? await _context.AuditLogs
+                    .AsNoTracking()
+                    .Where(a => a.EntityName == "User"
+                        && a.EntityID == primaryUserId.Value
+                        && (a.Action.StartsWith("EmergencySuspendPrimarySuperAdmin")
+                            || a.Action.StartsWith("EmergencyReactivatePrimarySuperAdmin")))
+                    .OrderByDescending(a => a.CreatedAt)
+                    .Select(a => (DateTime?)a.CreatedAt)
+                    .FirstOrDefaultAsync()
+                : null;
+
+            return new EmergencyAdminStatusResult
+            {
+                Success = true,
+                PrimarySuperAdminEmail = settings.PrimarySuperAdminEmail,
+                BackupSuperAdminEmail = settings.BackupSuperAdminEmail,
+                ExpectedConfirmationPhrase = settings.ConfirmationPhrase,
+                CooldownSeconds = settings.CooldownSeconds,
+                PrimaryUserFound = primary != null,
+                PrimaryStatus = primary?.Status ?? "NotFound",
+                IsPrimarySuspended = primary != null && !string.Equals(primary.Status, "Active", StringComparison.OrdinalIgnoreCase),
+                IsPrimaryPermanentlyLocked = primary?.IsPermanentlyLocked ?? false,
+                LastEmergencyActionAt = lastActionAt
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting emergency admin security status");
+            return new EmergencyAdminStatusResult
+            {
+                Success = false,
+                ErrorMessage = "Unable to load emergency security status right now."
+            };
+        }
+    }
+
+    public async Task<ServiceResult> SuspendPrimarySuperAdminAsync(int performedByUserId, string performedByEmail, EmergencySuperAdminActionRequest request, string? ipAddress = null)
+    {
+        return await ExecuteEmergencyActionAsync(
+            performedByUserId,
+            performedByEmail,
+            request,
+            ipAddress,
+            actionName: "EmergencySuspendPrimarySuperAdmin",
+            applyAction: primary =>
+            {
+                primary.Status = "Suspended";
+                primary.FailedLoginAttempts = 0;
+                primary.LockoutLevel = 0;
+                primary.LockoutEnd = null;
+                primary.IsPermanentlyLocked = true;
+                primary.PermanentlyLockedAt = DateTime.UtcNow;
+                primary.MustChangePassword = true;
+            },
+            alreadyAppliedCheck: primary => !string.Equals(primary.Status, "Active", StringComparison.OrdinalIgnoreCase) && primary.IsPermanentlyLocked,
+            alreadyAppliedMessage: "Primary super admin is already suspended.",
+            successMessage: "Primary super admin has been suspended.");
+    }
+
+    public async Task<ServiceResult> ReactivatePrimarySuperAdminAsync(int performedByUserId, string performedByEmail, EmergencySuperAdminActionRequest request, string? ipAddress = null)
+    {
+        return await ExecuteEmergencyActionAsync(
+            performedByUserId,
+            performedByEmail,
+            request,
+            ipAddress,
+            actionName: "EmergencyReactivatePrimarySuperAdmin",
+            applyAction: primary =>
+            {
+                primary.Status = "Active";
+                primary.FailedLoginAttempts = 0;
+                primary.LockoutLevel = 0;
+                primary.LockoutEnd = null;
+                primary.IsPermanentlyLocked = false;
+                primary.PermanentlyLockedAt = null;
+                primary.MustChangePassword = true;
+            },
+            alreadyAppliedCheck: primary => string.Equals(primary.Status, "Active", StringComparison.OrdinalIgnoreCase) && !primary.IsPermanentlyLocked,
+            alreadyAppliedMessage: "Primary super admin is already active.",
+            successMessage: "Primary super admin has been reactivated.");
+    }
+
+    private async Task<ServiceResult> ExecuteEmergencyActionAsync(
+        int performedByUserId,
+        string performedByEmail,
+        EmergencySuperAdminActionRequest request,
+        string? ipAddress,
+        string actionName,
+        Action<User> applyAction,
+        Func<User, bool> alreadyAppliedCheck,
+        string alreadyAppliedMessage,
+        string successMessage)
+    {
+        try
+        {
+            if (request == null)
+            {
+                return new ServiceResult { Success = false, ErrorMessage = "Invalid request." };
+            }
+
+            var settings = GetEmergencyAdminSettings();
+            var normalizedBackupEmail = NormalizeEmail(settings.BackupSuperAdminEmail);
+            var normalizedPrimaryEmail = NormalizeEmail(settings.PrimarySuperAdminEmail);
+            var normalizedActorEmail = NormalizeEmail(performedByEmail);
+
+            var actor = await _context.Users.FirstOrDefaultAsync(u => u.UserID == performedByUserId);
+            if (actor == null)
+            {
+                return new ServiceResult { Success = false, ErrorMessage = "Unable to validate backup super admin account." };
+            }
+
+            var actorEmail = NormalizeEmail(actor.Email);
+            var isBackupCaller = actorEmail == normalizedBackupEmail && normalizedActorEmail == normalizedBackupEmail;
+            if (!isBackupCaller)
+            {
+                await WriteSecurityAuditAsync(
+                    actor.UserID,
+                    actor.CompanyID,
+                    actionName + "Denied:CallerNotBackup",
+                    actor.UserID,
+                    ipAddress,
+                    request.Reason);
+
+                return new ServiceResult { Success = false, ErrorMessage = "Only the backup super admin can perform this action." };
+            }
+
+            if (NormalizePhrase(request.ConfirmationPhrase) != NormalizePhrase(settings.ConfirmationPhrase))
+            {
+                await WriteSecurityAuditAsync(
+                    actor.UserID,
+                    actor.CompanyID,
+                    actionName + "Denied:InvalidConfirmationPhrase",
+                    actor.UserID,
+                    ipAddress,
+                    request.Reason);
+
+                return new ServiceResult { Success = false, ErrorMessage = "Confirmation phrase does not match." };
+            }
+
+            if (string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Trim().Length < 8)
+            {
+                return new ServiceResult { Success = false, ErrorMessage = "A detailed reason is required (minimum 8 characters)." };
+            }
+
+            if (settings.CooldownSeconds > 0)
+            {
+                var cooldownStart = DateTime.UtcNow.AddSeconds(-settings.CooldownSeconds);
+                var hasRecentAction = await _context.AuditLogs
+                    .AsNoTracking()
+                    .AnyAsync(a => a.UserID == actor.UserID
+                        && a.CreatedAt >= cooldownStart
+                        && (a.Action.StartsWith("EmergencySuspendPrimarySuperAdmin")
+                            || a.Action.StartsWith("EmergencyReactivatePrimarySuperAdmin")));
+
+                if (hasRecentAction)
+                {
+                    return new ServiceResult
+                    {
+                        Success = false,
+                        ErrorMessage = $"Please wait {settings.CooldownSeconds} seconds before running another emergency action."
+                    };
+                }
+            }
+
+            var primary = await _context.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == normalizedPrimaryEmail);
+            if (primary == null)
+            {
+                return new ServiceResult { Success = false, ErrorMessage = "Primary super admin account was not found." };
+            }
+
+            if (NormalizeEmail(primary.Email) == normalizedBackupEmail || primary.UserID == actor.UserID)
+            {
+                await WriteSecurityAuditAsync(
+                    actor.UserID,
+                    actor.CompanyID,
+                    actionName + "Denied:TargetIsBackupOrSelf",
+                    primary.UserID,
+                    ipAddress,
+                    request.Reason);
+
+                return new ServiceResult { Success = false, ErrorMessage = "Emergency action cannot target the backup super admin account." };
+            }
+
+            if (alreadyAppliedCheck(primary))
+            {
+                return new ServiceResult { Success = false, ErrorMessage = alreadyAppliedMessage };
+            }
+
+            if (!VerifyStepUp(actor, request, out var stepUpError))
+            {
+                await WriteSecurityAuditAsync(
+                    actor.UserID,
+                    actor.CompanyID,
+                    actionName + "Denied:StepUpFailed",
+                    primary.UserID,
+                    ipAddress,
+                    request.Reason);
+
+                return new ServiceResult { Success = false, ErrorMessage = stepUpError };
+            }
+
+            await using var transaction = _context.Database.IsRelational()
+                ? await _context.Database.BeginTransactionAsync()
+                : null;
+
+            applyAction(primary);
+
+            _context.AuditLogs.Add(new AuditLog
+            {
+                UserID = actor.UserID,
+                CompanyID = actor.CompanyID,
+                Action = BuildEmergencyActionMessage(actionName, request.Reason),
+                EntityName = "User",
+                EntityID = primary.UserID,
+                IPAddress = ipAddress,
+                LogType = "Security",
+                CreatedAt = DateTime.UtcNow
+            });
+
+            await _context.SaveChangesAsync();
+
+            if (transaction != null)
+            {
+                await transaction.CommitAsync();
+            }
+
+            return new ServiceResult { Success = true, ErrorMessage = successMessage };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error executing emergency super admin action {ActionName}", actionName);
+            return new ServiceResult { Success = false, ErrorMessage = "Unable to complete this emergency action right now." };
+        }
+    }
+
+    private async Task WriteSecurityAuditAsync(int userId, int? companyId, string action, int entityId, string? ipAddress, string? reason)
+    {
+        try
+        {
+            _context.AuditLogs.Add(new AuditLog
+            {
+                UserID = userId,
+                CompanyID = companyId,
+                Action = BuildEmergencyActionMessage(action, reason),
+                EntityName = "User",
+                EntityID = entityId,
+                IPAddress = ipAddress,
+                LogType = "Security",
+                CreatedAt = DateTime.UtcNow
+            });
+
+            await _context.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to write security audit action {Action}", action);
+        }
+    }
+
+    private bool VerifyStepUp(User actor, EmergencySuperAdminActionRequest request, out string error)
+    {
+        error = "Step-up verification is required.";
+
+        var providedPassword = !string.IsNullOrWhiteSpace(request.CurrentPassword);
+        var providedTotp = !string.IsNullOrWhiteSpace(request.TotpCode);
+
+        if (!providedPassword && !providedTotp)
+        {
+            return false;
+        }
+
+        if (providedTotp
+            && actor.IsTotpEnabled
+            && !string.IsNullOrWhiteSpace(actor.TotpSecret)
+            && VerifyTotpCode(actor.TotpSecret!, request.TotpCode!))
+        {
+            return true;
+        }
+
+        if (providedPassword && BCrypt.Net.BCrypt.Verify(request.CurrentPassword, actor.Password))
+        {
+            return true;
+        }
+
+        error = "Step-up verification failed. Provide a valid backup admin password or authenticator code.";
+        return false;
+    }
+
+    private bool VerifyTotpCode(string secret, string code)
+    {
+        var digits = Math.Clamp(_configuration.GetValue<int?>("Security:Totp:Digits") ?? 6, 6, 8);
+        var periodSeconds = Math.Clamp(_configuration.GetValue<int?>("Security:Totp:PeriodSeconds") ?? 30, 15, 90);
+        var allowedDriftWindows = Math.Clamp(_configuration.GetValue<int?>("Security:Totp:AllowedDriftWindows") ?? 1, 0, 5);
+
+        return TotpService.VerifyTotpCode(secret, code, digits, periodSeconds, allowedDriftWindows);
+    }
+
+    private EmergencyAdminSettings GetEmergencyAdminSettings()
+    {
+        var primary = _configuration["Security:EmergencyAdmin:PrimarySuperAdminEmail"];
+        var backup = _configuration["Security:EmergencyAdmin:BackupSuperAdminEmail"];
+        var phrase = _configuration["Security:EmergencyAdmin:ConfirmationPhrase"];
+        var cooldown = _configuration.GetValue<int?>("Security:EmergencyAdmin:CooldownSeconds") ?? 30;
+
+        var normalizedPrimary = string.IsNullOrWhiteSpace(primary) ? string.Empty : primary.Trim();
+        var normalizedBackup = string.IsNullOrWhiteSpace(backup) ? string.Empty : backup.Trim();
+
+        return new EmergencyAdminSettings(
+            normalizedPrimary,
+            normalizedBackup,
+            string.IsNullOrWhiteSpace(phrase) ? "SUSPEND PRIMARY SUPERADMIN" : phrase.Trim(),
+            Math.Clamp(cooldown, 0, 600));
+    }
+
+    private static string NormalizeEmail(string? email)
+    {
+        return (email ?? string.Empty).Trim().ToLowerInvariant();
+    }
+
+    private static string NormalizePhrase(string? phrase)
+    {
+        return (phrase ?? string.Empty).Trim().ToUpperInvariant();
+    }
+
+    private static string BuildEmergencyActionMessage(string actionName, string? reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return actionName;
+        }
+
+        var normalizedReason = reason.Trim();
+        var reasonSuffix = normalizedReason.Length > 80 ? normalizedReason[..80] : normalizedReason;
+        return $"{actionName}: {reasonSuffix}";
+    }
+
+    private sealed record EmergencyAdminSettings(
+        string PrimarySuperAdminEmail,
+        string BackupSuperAdminEmail,
+        string ConfirmationPhrase,
+        int CooldownSeconds);
 
     // ========================
     // REVENUE

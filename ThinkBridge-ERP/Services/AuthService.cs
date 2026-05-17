@@ -8,6 +8,10 @@ namespace ThinkBridge_ERP.Services;
 
 public class AuthService : IAuthService
 {
+    private const int MaxFailedAttemptsPerStage = 5;
+    private const int FirstLockoutMinutes = 15;
+    private const int SecondLockoutMinutes = 30;
+
     private readonly ApplicationDbContext _context;
     private readonly ILogger<AuthService> _logger;
 
@@ -17,14 +21,16 @@ public class AuthService : IAuthService
         _logger = logger;
     }
 
-    public async Task<AuthResult> AuthenticateAsync(string email, string password)
+    public async Task<AuthResult> AuthenticateAsync(string email, string password, string? ipAddress = null)
     {
         try
         {
+            var normalizedEmail = email.Trim().ToLower();
+
             // Find user by email
             var user = await _context.Users
                 .Include(u => u.Company)
-                .FirstOrDefaultAsync(u => u.Email.ToLower() == email.ToLower());
+                .FirstOrDefaultAsync(u => u.Email.ToLower() == normalizedEmail);
 
             if (user == null)
             {
@@ -32,14 +38,130 @@ public class AuthService : IAuthService
                 return new AuthResult
                 {
                     Success = false,
-                    ErrorMessage = "Invalid email or password."
+                    ErrorMessage = "Invalid email or password.",
+                    ErrorCode = "invalid_credentials"
                 };
             }
 
-            // Check if user is active
-            if (user.Status != "Active")
+            if (user.IsPermanentlyLocked)
             {
-                // Check if user's company subscription expired past grace period
+                await TryWriteSecurityAuditAsync(user, "LoginBlockedPermanentLockout", ipAddress);
+                _logger.LogWarning("Login attempt failed: User {Email} is permanently locked", email);
+                return new AuthResult
+                {
+                    Success = false,
+                    ErrorMessage = "Your account has been permanently locked. Please contact your administrator.",
+                    ErrorCode = "permanent_lockout"
+                };
+            }
+
+            // Check if account is locked out
+            if (user.LockoutEnd.HasValue && user.LockoutEnd.Value > DateTime.UtcNow)
+            {
+                var remaining = (int)Math.Ceiling((user.LockoutEnd.Value - DateTime.UtcNow).TotalSeconds);
+                await TryWriteSecurityAuditAsync(user, "LoginBlockedTemporaryLockout", ipAddress);
+                _logger.LogWarning("Login attempt failed: User {Email} is locked out for {Seconds}s", email, remaining);
+                return new AuthResult
+                {
+                    Success = false,
+                    ErrorMessage = "Account is temporarily locked.",
+                    ErrorCode = "temporary_lockout",
+                    LockoutSeconds = remaining
+                };
+            }
+
+            // Verify password using BCrypt
+            if (!BCrypt.Net.BCrypt.Verify(password, user.Password))
+            {
+                user.FailedLoginAttempts++;
+
+                if (user.FailedLoginAttempts >= MaxFailedAttemptsPerStage)
+                {
+                    if (user.LockoutLevel <= 0)
+                    {
+                        user.LockoutLevel = 1;
+                        user.LockoutEnd = DateTime.UtcNow.AddMinutes(FirstLockoutMinutes);
+                        user.FailedLoginAttempts = 0;
+
+                        await _context.SaveChangesAsync();
+                        await TryWriteSecurityAuditAsync(user, "LoginLockoutLevel1Triggered", ipAddress);
+
+                        var firstLockoutSecs = (int)Math.Ceiling((user.LockoutEnd.Value - DateTime.UtcNow).TotalSeconds);
+                        _logger.LogWarning("User {Email} entered first lockout stage for {Minutes} minutes", email, FirstLockoutMinutes);
+
+                        return new AuthResult
+                        {
+                            Success = false,
+                            ErrorMessage = "Account is temporarily locked due to multiple failed attempts.",
+                            ErrorCode = "temporary_lockout",
+                            LockoutSeconds = firstLockoutSecs
+                        };
+                    }
+
+                    if (user.LockoutLevel == 1)
+                    {
+                        user.LockoutLevel = 2;
+                        user.LockoutEnd = DateTime.UtcNow.AddMinutes(SecondLockoutMinutes);
+                        user.FailedLoginAttempts = 0;
+
+                        await _context.SaveChangesAsync();
+                        await TryWriteSecurityAuditAsync(user, "LoginLockoutLevel2Triggered", ipAddress);
+
+                        var secondLockoutSecs = (int)Math.Ceiling((user.LockoutEnd.Value - DateTime.UtcNow).TotalSeconds);
+                        _logger.LogWarning("User {Email} entered second lockout stage for {Minutes} minutes", email, SecondLockoutMinutes);
+
+                        return new AuthResult
+                        {
+                            Success = false,
+                            ErrorMessage = "Account is temporarily locked due to multiple failed attempts.",
+                            ErrorCode = "temporary_lockout",
+                            LockoutSeconds = secondLockoutSecs
+                        };
+                    }
+
+                    user.LockoutLevel = 3;
+                    user.IsPermanentlyLocked = true;
+                    user.PermanentlyLockedAt = DateTime.UtcNow;
+                    user.LockoutEnd = null;
+                    user.FailedLoginAttempts = 0;
+
+                    await _context.SaveChangesAsync();
+                    await TryWriteSecurityAuditAsync(user, "LoginPermanentLockoutTriggered", ipAddress);
+
+                    _logger.LogWarning("User {Email} has been permanently locked after repeated failed login attempts", email);
+                    return new AuthResult
+                    {
+                        Success = false,
+                        ErrorMessage = "Your account has been permanently locked. Please contact your administrator.",
+                        ErrorCode = "permanent_lockout"
+                    };
+                }
+
+                await _context.SaveChangesAsync();
+                await TryWriteSecurityAuditAsync(user, $"LoginFailedInvalidPasswordAttempt{user.FailedLoginAttempts}", ipAddress);
+
+                _logger.LogWarning("Login attempt failed: Invalid password for user {Email} (attempt {Attempts})", email, user.FailedLoginAttempts);
+
+                return new AuthResult
+                {
+                    Success = false,
+                    ErrorMessage = "Invalid email or password.",
+                    ErrorCode = "invalid_credentials",
+                    LockoutSeconds = 0
+                };
+            }
+
+            // Reset failed attempts on successful login
+            if (user.FailedLoginAttempts > 0 || user.LockoutEnd.HasValue)
+            {
+                user.FailedLoginAttempts = 0;
+                user.LockoutEnd = null;
+                await _context.SaveChangesAsync();
+            }
+
+            // Check account status only after password verification to avoid exposing account state.
+            if (!string.Equals(user.Status, "Active", StringComparison.OrdinalIgnoreCase))
+            {
                 if (user.CompanyID.HasValue)
                 {
                     var subscription = await _context.Subscriptions
@@ -49,11 +171,20 @@ public class AuthService : IAuthService
 
                     if (subscription != null && subscription.Status == "Expired")
                     {
+                        var rolesForRenewal = await GetUserRolesAsync(user.UserID);
+                        var canRenew = user.IsSuperAdmin || rolesForRenewal.Contains("SuperAdmin") || rolesForRenewal.Contains("CompanyAdmin");
+
                         _logger.LogWarning("Login blocked: User {Email} - subscription expired past grace period", email);
                         return new AuthResult
                         {
                             Success = false,
-                            ErrorMessage = "Your subscription has expired and the grace period has ended. Please contact your administrator to renew."
+                            ErrorCode = "subscription_expired",
+                            ErrorMessage = canRenew
+                                ? "Your subscription has expired and the grace period has ended. Renew now to restore access."
+                                : "Your subscription has expired and the grace period has ended. Please contact your company administrator to renew.",
+                            CanRenewSubscription = canRenew,
+                            RenewalSubscriptionId = canRenew ? subscription.SubscriptionID : null,
+                            RenewalUserId = canRenew ? user.UserID : null
                         };
                     }
                 }
@@ -62,54 +193,9 @@ public class AuthService : IAuthService
                 return new AuthResult
                 {
                     Success = false,
+                    ErrorCode = "account_inactive",
                     ErrorMessage = "Your account is not active. Please contact your administrator."
                 };
-            }
-
-            // Check if account is locked out
-            if (user.LockoutEnd.HasValue && user.LockoutEnd.Value > DateTime.UtcNow)
-            {
-                var remaining = (int)Math.Ceiling((user.LockoutEnd.Value - DateTime.UtcNow).TotalSeconds);
-                _logger.LogWarning("Login attempt failed: User {Email} is locked out for {Seconds}s", email, remaining);
-                return new AuthResult
-                {
-                    Success = false,
-                    ErrorMessage = "Account is temporarily locked.",
-                    LockoutSeconds = remaining
-                };
-            }
-
-            // Verify password using BCrypt
-            if (!BCrypt.Net.BCrypt.Verify(password, user.Password))
-            {
-                user.FailedLoginAttempts++;
-                if (user.FailedLoginAttempts >= 3)
-                {
-                    user.LockoutEnd = DateTime.UtcNow.AddMinutes(1);
-                    _logger.LogWarning("User {Email} locked out after {Attempts} failed attempts", email, user.FailedLoginAttempts);
-                }
-                await _context.SaveChangesAsync();
-
-                _logger.LogWarning("Login attempt failed: Invalid password for user {Email} (attempt {Attempts})", email, user.FailedLoginAttempts);
-                var lockoutSecs = user.FailedLoginAttempts >= 3 && user.LockoutEnd.HasValue
-                    ? (int)Math.Ceiling((user.LockoutEnd.Value - DateTime.UtcNow).TotalSeconds)
-                    : 0;
-                return new AuthResult
-                {
-                    Success = false,
-                    ErrorMessage = user.FailedLoginAttempts >= 3
-                        ? "Account is temporarily locked due to multiple failed attempts."
-                        : "Invalid email or password.",
-                    LockoutSeconds = lockoutSecs
-                };
-            }
-
-            // Reset failed attempts on successful login
-            if (user.FailedLoginAttempts > 0)
-            {
-                user.FailedLoginAttempts = 0;
-                user.LockoutEnd = null;
-                await _context.SaveChangesAsync();
             }
 
             // Get user roles
@@ -136,6 +222,7 @@ public class AuthService : IAuthService
             return new AuthResult
             {
                 Success = false,
+                ErrorCode = "server_error",
                 ErrorMessage = "An error occurred during login. Please try again."
             };
         }
@@ -150,9 +237,11 @@ public class AuthService : IAuthService
 
     public async Task<User?> GetUserByEmailAsync(string email)
     {
+        var normalizedEmail = email.Trim().ToLower();
+
         return await _context.Users
             .Include(u => u.Company)
-            .FirstOrDefaultAsync(u => u.Email.ToLower() == email.ToLower());
+            .FirstOrDefaultAsync(u => u.Email.ToLower() == normalizedEmail);
     }
 
     public async Task UpdateLastLoginAsync(int userId)
@@ -204,5 +293,31 @@ public class AuthService : IAuthService
 
         // Default fallback
         return "TeamMember";
+    }
+
+    private async Task TryWriteSecurityAuditAsync(User user, string action, string? ipAddress)
+    {
+        var auditLog = new AuditLog
+        {
+            UserID = user.UserID,
+            CompanyID = user.CompanyID,
+            Action = action,
+            EntityName = "User",
+            EntityID = user.UserID,
+            IPAddress = ipAddress,
+            LogType = "Security",
+            CreatedAt = DateTime.UtcNow
+        };
+
+        try
+        {
+            _context.AuditLogs.Add(auditLog);
+            await _context.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to write security audit log for user {UserId} and action {Action}", user.UserID, action);
+            _context.Entry(auditLog).State = EntityState.Detached;
+        }
     }
 }

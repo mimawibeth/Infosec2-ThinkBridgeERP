@@ -10,12 +10,15 @@
     let currentAction = 'All';
     let currentEntity = 'All';
     let currentDateRange = 'today';
+    let currentLogType = 'system';
     let totalPages = 1;
     let autoRefreshInterval = null;
 
     // ─── Init ────────────────────────────────────
 
     document.addEventListener('DOMContentLoaded', function () {
+        initTabs();
+        initTabStateFromUrl();
         initSearch();
         initFilters();
         initRefreshButton();
@@ -53,6 +56,78 @@
                 loadAuditLogs();
             }, 400);
         });
+    }
+
+    // ─── Tabs ────────────────────────────────────
+
+    function initTabs() {
+        const tabs = document.querySelectorAll('.audit-log-tabs .tab-btn');
+        const tabsContainer = document.querySelector('.audit-log-tabs');
+
+        tabs.forEach(tab => {
+            tab.addEventListener('click', function () {
+                const nextType = this.getAttribute('data-log-type') || 'system';
+                setActiveTab(nextType, true);
+            });
+        });
+
+        if (tabsContainer) {
+            tabsContainer.addEventListener('keydown', function (e) {
+                const tabButtons = Array.from(document.querySelectorAll('.audit-log-tabs .tab-btn'));
+                const currentIndex = tabButtons.findIndex(btn => btn.classList.contains('active'));
+
+                if (currentIndex < 0 || tabButtons.length === 0) return;
+
+                let targetIndex = currentIndex;
+                if (e.key === 'ArrowRight') targetIndex = (currentIndex + 1) % tabButtons.length;
+                if (e.key === 'ArrowLeft') targetIndex = (currentIndex - 1 + tabButtons.length) % tabButtons.length;
+                if (e.key === 'Home') targetIndex = 0;
+                if (e.key === 'End') targetIndex = tabButtons.length - 1;
+
+                if (targetIndex !== currentIndex) {
+                    e.preventDefault();
+                    tabButtons[targetIndex].focus();
+                    const nextType = tabButtons[targetIndex].getAttribute('data-log-type') || 'system';
+                    setActiveTab(nextType, true);
+                }
+            });
+        }
+    }
+
+    function initTabStateFromUrl() {
+        const url = new URL(window.location.href);
+        const tab = (url.searchParams.get('tab') || '').toLowerCase();
+        setActiveTab(tab === 'security' ? 'security' : 'system', false);
+    }
+
+    function setActiveTab(logType, shouldReload) {
+        const nextType = logType === 'security' ? 'security' : 'system';
+        const changed = nextType !== currentLogType;
+        currentLogType = nextType;
+
+        const panel = document.getElementById('audit-log-panel');
+        document.querySelectorAll('.audit-log-tabs .tab-btn').forEach(btn => {
+            const isActive = btn.getAttribute('data-log-type') === currentLogType;
+            btn.classList.toggle('active', isActive);
+            btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            btn.setAttribute('tabindex', isActive ? '0' : '-1');
+            if (isActive && panel) {
+                panel.setAttribute('aria-labelledby', btn.id);
+            }
+        });
+
+        persistTabToUrl();
+
+        if (shouldReload && changed) {
+            currentPage = 1;
+            loadAuditLogs();
+        }
+    }
+
+    function persistTabToUrl() {
+        const url = new URL(window.location.href);
+        url.searchParams.set('tab', currentLogType);
+        window.history.replaceState({}, '', url.toString());
     }
 
     // ─── Filters ─────────────────────────────────
@@ -168,7 +243,7 @@
         const tbody = document.getElementById('audit-log-body');
         if (!tbody) return;
 
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:2rem; color:var(--text-muted);">Loading audit logs...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" class="audit-log-state-row">Loading audit logs...</td></tr>';
 
         const params = new URLSearchParams({
             page: currentPage,
@@ -179,20 +254,23 @@
         if (currentAction && currentAction !== 'All') params.append('action', currentAction);
         if (currentEntity && currentEntity !== 'All') params.append('entity', currentEntity);
         if (currentDateRange) params.append('dateRange', currentDateRange);
+        params.append('logType', currentLogType === 'security' ? 'Security' : 'System');
 
         const result = await apiGet(`/api/companyadmin/auditlogs?${params}`);
 
         if (!result.success) {
-            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:2rem; color:var(--danger);">${escapeHtml(result.message)}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="5" class="audit-log-state-row audit-log-state-error">${escapeHtml(result.message)}</td></tr>`;
             return;
         }
+
+        updateTabCounts(result.counts);
 
         const logs = result.data || [];
         totalPages = result.pagination?.totalPages || 1;
         const totalCount = result.pagination?.totalCount || 0;
 
         if (logs.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:2rem; color:var(--text-muted);">No audit logs found.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5" class="audit-log-state-row">No audit logs found.</td></tr>';
             renderPagination(0);
             return;
         }
@@ -226,6 +304,21 @@
 
         tbody.innerHTML = html;
         renderPagination(totalCount);
+    }
+
+    function updateTabCounts(counts) {
+        if (!counts) return;
+
+        const systemCount = document.getElementById('system-log-count');
+        const securityCount = document.getElementById('security-log-count');
+
+        if (systemCount) {
+            systemCount.textContent = String(counts.system ?? 0);
+        }
+
+        if (securityCount) {
+            securityCount.textContent = String(counts.security ?? 0);
+        }
     }
 
     // ─── Pagination ──────────────────────────────

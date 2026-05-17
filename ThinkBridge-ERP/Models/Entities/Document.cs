@@ -60,6 +60,7 @@ public class Document
 
     public virtual ICollection<DocumentAccess> DocumentAccesses { get; set; } = new List<DocumentAccess>();
     public virtual ICollection<DocumentTag> DocumentTags { get; set; } = new List<DocumentTag>();
+    public virtual ICollection<DocumentReference> DocumentReferences { get; set; } = new List<DocumentReference>();
     public virtual ICollection<DocumentVersion> DocumentVersions { get; set; } = new List<DocumentVersion>();
     public virtual ICollection<PostDocument> PostDocuments { get; set; } = new List<PostDocument>();
 }

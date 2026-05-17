@@ -357,7 +357,10 @@ public class CompanyService : ICompanyService
                 company.Industry = request.Industry;
 
             if (!string.IsNullOrWhiteSpace(request.Status))
+            {
                 company.Status = request.Status;
+                await CompanyUserStatusSync.ApplyForCompanyStatusAsync(_context, companyId, request.Status);
+            }
 
             // Update admin email and phone if provided
             if (request.AdminEmail != null || request.AdminPhone != null)
@@ -410,21 +413,8 @@ public class CompanyService : ICompanyService
             }
 
             company.Status = status;
+            await CompanyUserStatusSync.ApplyForCompanyStatusAsync(_context, companyId, status);
             await _context.SaveChangesAsync();
-
-            // If deactivating, also deactivate all company users
-            if (status.ToLower() == "inactive")
-            {
-                var companyUsers = await _context.Users
-                    .Where(u => u.CompanyID == companyId)
-                    .ToListAsync();
-
-                foreach (var user in companyUsers)
-                {
-                    user.Status = "Inactive";
-                }
-                await _context.SaveChangesAsync();
-            }
 
             _logger.LogInformation("Updated company {CompanyId} status to {Status}", companyId, status);
 

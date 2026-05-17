@@ -104,7 +104,7 @@
             <section id="security" class="settings-section">
                 <div class="section-header">
                     <h2 class="section-title">Security</h2>
-                    <p class="section-description">Manage your password.</p>
+                    <p class="section-description">Manage your password and two-factor authentication.</p>
                 </div>
                 <div class="settings-card">
                     <h3 class="card-title">Change Password</h3>
@@ -179,6 +179,101 @@
                                     </button>
                                 </div>
                             </form>
+                        </div>
+
+                        <div class="settings-card">
+                            <h3 class="card-title">Authenticator App (TOTP)</h3>
+                            <p class="card-description">Use Google Authenticator or any TOTP app for a safer sign-in experience.</p>
+
+                            <div class="totp-status-row">
+                                <span class="status-badge" id="totp-status-badge">Checking...</span>
+                                <span class="form-hint" id="totp-status-hint"></span>
+                            </div>
+
+                            <div id="totp-disabled-panel">
+                                <div class="totp-action-row">
+                                    <button type="button" class="btn btn-primary" id="btn-start-totp-setup">Set Up Authenticator</button>
+                                </div>
+
+                                <div class="totp-setup-panel" id="totp-setup-panel" style="display: none;">
+                                    <div class="totp-setup-grid">
+                                        <div class="totp-qr-wrap">
+                                            <img id="totp-qr-image" alt="TOTP QR code" />
+                                        </div>
+                                        <div>
+                                            <p class="form-hint">Scan this QR code with your authenticator app.</p>
+                                            <button type="button" class="totp-manual-toggle" id="btn-show-totp-manual-key">Can't scan QR? Enter key manually</button>
+                                            <div id="totp-manual-key-wrap" style="display: none;">
+                                                <label class="totp-manual-key-label" for="totp-manual-key">Manual setup key</label>
+                                                <input type="text" id="totp-manual-key" class="form-input" readonly />
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="totp-verify-row">
+                                        <div class="form-group">
+                                            <label for="totp-setup-code">Verification Code</label>
+                                            <input type="text" id="totp-setup-code" class="form-input" inputmode="numeric"
+                                                   placeholder="Enter code from app" maxlength="8" />
+                                        </div>
+                                        <div class="totp-action-row">
+                                            <button type="button" class="btn btn-primary" id="btn-verify-totp-setup">Verify & Enable</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div id="totp-enabled-panel" style="display: none;">
+                                <div class="totp-action-row">
+                                    <button type="button" class="btn btn-secondary" id="btn-show-backup-codes">Show Backup Codes</button>
+                                    <button type="button" class="btn btn-secondary" id="btn-show-regenerate-backup-form">Regenerate Backup Codes</button>
+                                    <button type="button" class="btn btn-secondary" id="btn-show-disable-totp-form">Disable Authenticator</button>
+                                </div>
+
+                                <div class="backup-codes-panel" id="backup-codes-panel" style="display: none;">
+                                    <p class="form-hint">Store these backup codes in a safe place. Each code can only be used once.</p>
+                                    <div class="backup-codes-grid" id="backup-codes-grid"></div>
+                                    <div class="totp-action-row">
+                                        <button type="button" class="btn btn-secondary" id="btn-copy-backup-codes">Copy Codes</button>
+                                    </div>
+                                </div>
+
+                                <div class="totp-sensitive-panel" id="totp-regenerate-form" style="display: none;">
+                                    <h4>Regenerate Backup Codes</h4>
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label for="totp-regenerate-password">Current Password</label>
+                                            <input type="password" id="totp-regenerate-password" class="form-input" />
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="totp-regenerate-code">Authenticator or Backup Code</label>
+                                            <input type="text" id="totp-regenerate-code" class="form-input" placeholder="000000 or ABCD-EFGH" />
+                                        </div>
+                                    </div>
+                                    <div class="totp-action-row">
+                                        <button type="button" class="btn btn-primary" id="btn-regenerate-backup-codes">Regenerate</button>
+                                        <button type="button" class="btn btn-secondary" id="btn-cancel-regenerate-backup">Cancel</button>
+                                    </div>
+                                </div>
+
+                                <div class="totp-sensitive-panel" id="totp-disable-form" style="display: none;">
+                                    <h4>Disable Authenticator</h4>
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label for="totp-disable-password">Current Password</label>
+                                            <input type="password" id="totp-disable-password" class="form-input" />
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="totp-disable-code">Authenticator or Backup Code</label>
+                                            <input type="text" id="totp-disable-code" class="form-input" placeholder="000000 or ABCD-EFGH" />
+                                        </div>
+                                    </div>
+                                    <div class="totp-action-row">
+                                        <button type="button" class="btn btn-primary" id="btn-disable-totp">Disable</button>
+                                        <button type="button" class="btn btn-secondary" id="btn-cancel-disable-totp">Cancel</button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </section>
 

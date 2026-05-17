@@ -101,6 +101,7 @@ public class KnowledgeBaseService : IKnowledgeBaseService
                     UpdatedAt = d.UpdatedAt,
                     PublishedAt = d.PublishedAt,
                     Tags = d.DocumentTags.Select(dt => dt.Tag.TagName).ToList(),
+                    ReferenceCount = d.DocumentReferences.Count(),
                     CommentCount = _context.Comments.Count(c => c.Post.PostDocuments.Any(pd => pd.DocumentID == d.DocumentID))
                 })
                 .ToListAsync();
@@ -131,6 +132,7 @@ public class KnowledgeBaseService : IKnowledgeBaseService
                 .Include(d => d.Approver)
                 .Include(d => d.Project)
                 .Include(d => d.DocumentTags).ThenInclude(dt => dt.Tag)
+                .Include(d => d.DocumentReferences)
                 .Include(d => d.DocumentVersions)
                 .FirstOrDefaultAsync(d => d.DocumentID == documentId && d.CompanyID == companyId);
 
@@ -169,11 +171,26 @@ public class KnowledgeBaseService : IKnowledgeBaseService
                 UpdatedAt = doc.UpdatedAt,
                 PublishedAt = doc.PublishedAt,
                 Tags = doc.DocumentTags.Select(dt => dt.Tag.TagName).ToList(),
+                ReferenceCount = doc.DocumentReferences.Count,
                 CommentCount = commentCount,
                 ProjectID = doc.ProjectID,
                 ProjectName = doc.Project?.ProjectName,
                 UploadedBy = doc.UploadedBy,
-                FileType = doc.FileType
+                FileType = doc.FileType,
+                References = doc.DocumentReferences
+                    .OrderBy(r => r.SortOrder)
+                    .Select(r => new ArticleReferenceItem
+                    {
+                        ReferenceID = r.ReferenceID,
+                        Title = r.Title,
+                        Url = r.Url,
+                        Author = r.Author,
+                        SourceName = r.SourceName,
+                        PublishedDateText = r.PublishedDateText,
+                        Notes = r.Notes,
+                        SortOrder = r.SortOrder
+                    })
+                    .ToList()
             };
 
             return new ArticleDetailResult { Success = true, Article = article };
@@ -197,6 +214,12 @@ public class KnowledgeBaseService : IKnowledgeBaseService
             var folder = await _context.Folders.FirstOrDefaultAsync(f => f.FolderID == request.FolderId && f.CompanyID == companyId);
             if (folder == null)
                 return new CreateArticleResult { Success = false, ErrorMessage = "Category not found." };
+
+            var normalizedReferences = NormalizeReferences(request.References);
+            var requiresCitation = !request.SaveAsDraft && LooksExternallySourced(request.Title, request.Description, request.Content);
+            var referencesValidationError = ValidateReferences(normalizedReferences, requiresCitation);
+            if (!string.IsNullOrWhiteSpace(referencesValidationError))
+                return new CreateArticleResult { Success = false, ErrorMessage = referencesValidationError };
 
             // Determine approval status based on role
             string approvalStatus;
@@ -267,6 +290,23 @@ public class KnowledgeBaseService : IKnowledgeBaseService
                 }
             }
 
+            for (var i = 0; i < normalizedReferences.Count; i++)
+            {
+                var reference = normalizedReferences[i];
+                _context.DocumentReferences.Add(new DocumentReference
+                {
+                    DocumentID = document.DocumentID,
+                    Title = reference.Title!,
+                    Url = reference.Url,
+                    Author = reference.Author,
+                    SourceName = reference.SourceName,
+                    PublishedDateText = reference.PublishedDateText,
+                    Notes = reference.Notes,
+                    SortOrder = i,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+
             await _context.SaveChangesAsync();
 
             // Create a Post for comments to be attached to
@@ -318,6 +358,7 @@ public class KnowledgeBaseService : IKnowledgeBaseService
         {
             var doc = await _context.Documents
                 .Include(d => d.DocumentTags)
+                .Include(d => d.DocumentReferences)
                 .Include(d => d.DocumentVersions)
                 .FirstOrDefaultAsync(d => d.DocumentID == documentId && d.CompanyID == companyId);
 
@@ -345,6 +386,51 @@ public class KnowledgeBaseService : IKnowledgeBaseService
                 doc.ProjectID = request.ProjectId.Value;
 
             doc.UpdatedAt = DateTime.UtcNow;
+
+            var effectiveTitle = !string.IsNullOrWhiteSpace(request.Title) ? request.Title : doc.Title;
+            var effectiveDescription = request.Description ?? doc.Description;
+            var currentContent = doc.DocumentVersions
+                .OrderByDescending(v => v.UploadedAt)
+                .Select(v => v.FilePath)
+                .FirstOrDefault();
+            var effectiveContent = !string.IsNullOrWhiteSpace(request.Content) ? request.Content : currentContent;
+            var isPublishingOrSubmitting = (request.SubmitForApproval == true && userRole == "ProjectManager")
+                || (userRole == "CompanyAdmin" && doc.ApprovalStatus == "Draft");
+            var requiresCitation = isPublishingOrSubmitting && LooksExternallySourced(effectiveTitle, effectiveDescription, effectiveContent);
+            var normalizedReferences = request.References != null ? NormalizeReferences(request.References) : null;
+
+            if (normalizedReferences != null)
+            {
+                var referencesValidationError = ValidateReferences(normalizedReferences, requiresCitation);
+                if (!string.IsNullOrWhiteSpace(referencesValidationError))
+                    return new ServiceResult { Success = false, ErrorMessage = referencesValidationError };
+
+                _context.DocumentReferences.RemoveRange(doc.DocumentReferences);
+                for (var i = 0; i < normalizedReferences.Count; i++)
+                {
+                    var reference = normalizedReferences[i];
+                    _context.DocumentReferences.Add(new DocumentReference
+                    {
+                        DocumentID = doc.DocumentID,
+                        Title = reference.Title!,
+                        Url = reference.Url,
+                        Author = reference.Author,
+                        SourceName = reference.SourceName,
+                        PublishedDateText = reference.PublishedDateText,
+                        Notes = reference.Notes,
+                        SortOrder = i,
+                        CreatedAt = DateTime.UtcNow
+                    });
+                }
+            }
+            else if (requiresCitation && !doc.DocumentReferences.Any())
+            {
+                return new ServiceResult
+                {
+                    Success = false,
+                    ErrorMessage = "At least one reference is required before submitting or publishing externally sourced content."
+                };
+            }
 
             // Handle content update via new version
             if (!string.IsNullOrWhiteSpace(request.Content))
@@ -926,6 +1012,96 @@ public class KnowledgeBaseService : IKnowledgeBaseService
     // ──────────────────────────────────────────────
     // Helpers
     // ──────────────────────────────────────────────
+
+    private static List<ArticleReferenceRequest> NormalizeReferences(IEnumerable<ArticleReferenceRequest>? references)
+    {
+        if (references == null)
+        {
+            return new List<ArticleReferenceRequest>();
+        }
+
+        return references
+            .Select((r, index) => new ArticleReferenceRequest
+            {
+                Title = r.Title?.Trim(),
+                Url = r.Url?.Trim(),
+                Author = r.Author?.Trim(),
+                SourceName = r.SourceName?.Trim(),
+                PublishedDateText = r.PublishedDateText?.Trim(),
+                Notes = r.Notes?.Trim(),
+                SortOrder = r.SortOrder ?? index
+            })
+            .Where(r => !string.IsNullOrWhiteSpace(r.Title)
+                || !string.IsNullOrWhiteSpace(r.Url)
+                || !string.IsNullOrWhiteSpace(r.Author)
+                || !string.IsNullOrWhiteSpace(r.SourceName)
+                || !string.IsNullOrWhiteSpace(r.PublishedDateText)
+                || !string.IsNullOrWhiteSpace(r.Notes))
+            .OrderBy(r => r.SortOrder)
+            .ToList();
+    }
+
+    private static string? ValidateReferences(IReadOnlyCollection<ArticleReferenceRequest> references, bool requireAtLeastOne)
+    {
+        if (requireAtLeastOne && references.Count == 0)
+        {
+            return "At least one reference is required before submitting or publishing externally sourced content.";
+        }
+
+        foreach (var reference in references)
+        {
+            if (string.IsNullOrWhiteSpace(reference.Title))
+            {
+                return "Each reference must include a title.";
+            }
+
+            if (string.IsNullOrWhiteSpace(reference.Url))
+            {
+                return "Each reference must include a source URL.";
+            }
+
+            if (!Uri.TryCreate(reference.Url, UriKind.Absolute, out var uri)
+                || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            {
+                return "Each reference URL must be a valid http or https link.";
+            }
+        }
+
+        return null;
+    }
+
+    private static bool LooksExternallySourced(string? title, string? description, string? content)
+    {
+        var combined = string.Join(" ", new[] { title, description, content })
+            .ToLowerInvariant();
+
+        if (string.IsNullOrWhiteSpace(combined))
+        {
+            return false;
+        }
+
+        if (combined.Contains("http://") || combined.Contains("https://") || combined.Contains("www."))
+        {
+            return true;
+        }
+
+        var indicators = new[]
+        {
+            "according to",
+            "study",
+            "research",
+            "journal",
+            "guideline",
+            "whitepaper",
+            "report",
+            "who",
+            "cdc",
+            "iso",
+            "nist"
+        };
+
+        return indicators.Any(combined.Contains);
+    }
 
     private async System.Threading.Tasks.Task NotifyAdminsOfPendingArticle(int companyId, int authorUserId, string articleTitle)
     {

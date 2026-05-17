@@ -52,6 +52,7 @@ public class CreateArticleRequest
     public int? ProjectId { get; set; }
     public string FileType { get; set; } = "Article";
     public List<string> Tags { get; set; } = new();
+    public List<ArticleReferenceRequest> References { get; set; } = new();
     public bool SaveAsDraft { get; set; } = false;
 }
 
@@ -63,7 +64,19 @@ public class UpdateArticleRequest
     public int? FolderId { get; set; }
     public int? ProjectId { get; set; }
     public List<string>? Tags { get; set; }
+    public List<ArticleReferenceRequest>? References { get; set; }
     public bool? SubmitForApproval { get; set; }
+}
+
+public class ArticleReferenceRequest
+{
+    public string? Title { get; set; }
+    public string? Url { get; set; }
+    public string? Author { get; set; }
+    public string? SourceName { get; set; }
+    public string? PublishedDateText { get; set; }
+    public string? Notes { get; set; }
+    public int? SortOrder { get; set; }
 }
 
 // ─── Response DTOs ──────────────────────────────────────
@@ -93,6 +106,7 @@ public class ArticleItem
     public DateTime? UpdatedAt { get; set; }
     public DateTime? PublishedAt { get; set; }
     public List<string> Tags { get; set; } = new();
+    public int ReferenceCount { get; set; }
     public int CommentCount { get; set; }
 }
 
@@ -108,6 +122,19 @@ public class ArticleDetailItem : ArticleItem
     public string? ProjectName { get; set; }
     public int UploadedBy { get; set; }
     public string FileType { get; set; } = string.Empty;
+    public List<ArticleReferenceItem> References { get; set; } = new();
+}
+
+public class ArticleReferenceItem
+{
+    public int ReferenceID { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string? Url { get; set; }
+    public string? Author { get; set; }
+    public string? SourceName { get; set; }
+    public string? PublishedDateText { get; set; }
+    public string? Notes { get; set; }
+    public int SortOrder { get; set; }
 }
 
 public class CreateArticleResult : ServiceResult

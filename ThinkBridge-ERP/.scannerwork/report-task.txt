@@ -1,0 +1,6 @@
+projectKey=thinkbridge-erp
+serverUrl=http://localhost:9000
+serverVersion=26.4.0.121862
+dashboardUrl=http://localhost:9000/dashboard?id=thinkbridge-erp
+ceTaskId=21fd51cf-18ea-46a1-b987-7a18500ffecb
+ceTaskUrl=http://localhost:9000/api/ce/task?id=21fd51cf-18ea-46a1-b987-7a18500ffecb

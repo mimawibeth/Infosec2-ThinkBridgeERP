@@ -1,20 +1,46 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.14.36603.0 d17.14
+VisualStudioVersion = 17.14.36603.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ThinkBridge-ERP", "ThinkBridge-ERP.csproj", "{7649420F-DCA3-430D-B588-88087A404459}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ThinkBridge-ERP.Tests", "ThinkBridge-ERP.Tests\ThinkBridge-ERP.Tests.csproj", "{0C573E2D-88DA-460C-9AFF-58736BFD8911}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
+		Debug|x64 = Debug|x64
+		Debug|x86 = Debug|x86
 		Release|Any CPU = Release|Any CPU
+		Release|x64 = Release|x64
+		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{7649420F-DCA3-430D-B588-88087A404459}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{7649420F-DCA3-430D-B588-88087A404459}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7649420F-DCA3-430D-B588-88087A404459}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{7649420F-DCA3-430D-B588-88087A404459}.Debug|x64.Build.0 = Debug|Any CPU
+		{7649420F-DCA3-430D-B588-88087A404459}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{7649420F-DCA3-430D-B588-88087A404459}.Debug|x86.Build.0 = Debug|Any CPU
 		{7649420F-DCA3-430D-B588-88087A404459}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{7649420F-DCA3-430D-B588-88087A404459}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7649420F-DCA3-430D-B588-88087A404459}.Release|x64.ActiveCfg = Release|Any CPU
+		{7649420F-DCA3-430D-B588-88087A404459}.Release|x64.Build.0 = Release|Any CPU
+		{7649420F-DCA3-430D-B588-88087A404459}.Release|x86.ActiveCfg = Release|Any CPU
+		{7649420F-DCA3-430D-B588-88087A404459}.Release|x86.Build.0 = Release|Any CPU
+		{0C573E2D-88DA-460C-9AFF-58736BFD8911}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0C573E2D-88DA-460C-9AFF-58736BFD8911}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0C573E2D-88DA-460C-9AFF-58736BFD8911}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{0C573E2D-88DA-460C-9AFF-58736BFD8911}.Debug|x64.Build.0 = Debug|Any CPU
+		{0C573E2D-88DA-460C-9AFF-58736BFD8911}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{0C573E2D-88DA-460C-9AFF-58736BFD8911}.Debug|x86.Build.0 = Debug|Any CPU
+		{0C573E2D-88DA-460C-9AFF-58736BFD8911}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0C573E2D-88DA-460C-9AFF-58736BFD8911}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0C573E2D-88DA-460C-9AFF-58736BFD8911}.Release|x64.ActiveCfg = Release|Any CPU
+		{0C573E2D-88DA-460C-9AFF-58736BFD8911}.Release|x64.Build.0 = Release|Any CPU
+		{0C573E2D-88DA-460C-9AFF-58736BFD8911}.Release|x86.ActiveCfg = Release|Any CPU
+		{0C573E2D-88DA-460C-9AFF-58736BFD8911}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

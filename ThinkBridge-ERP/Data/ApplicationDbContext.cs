@@ -50,6 +50,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<DocumentAccess> DocumentAccesses { get; set; }
     public DbSet<Tag> Tags { get; set; }
     public DbSet<DocumentTag> DocumentTags { get; set; }
+    public DbSet<DocumentReference> DocumentReferences { get; set; }
     public DbSet<DocumentVersion> DocumentVersions { get; set; }
 
     // Collaboration
@@ -73,6 +74,19 @@ public class ApplicationDbContext : DbContext
             .HasIndex(u => u.Email)
             .IsUnique()
             .HasDatabaseName("UX_User_Email");
+
+        modelBuilder.Entity<AuditLog>()
+            .Property(a => a.LogType)
+            .HasMaxLength(20)
+            .HasDefaultValue("System");
+
+        modelBuilder.Entity<User>()
+            .Property(u => u.IsTotpEnabled)
+            .HasDefaultValue(false);
+
+        modelBuilder.Entity<User>()
+            .Property(u => u.TotpFailedAttempts)
+            .HasDefaultValue(0);
 
         // Configure User - Company relationship (optional for SuperAdmin)
         modelBuilder.Entity<User>()
@@ -203,6 +217,20 @@ public class ApplicationDbContext : DbContext
             .WithMany(p => p.Documents)
             .HasForeignKey(d => d.ProjectID)
             .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<DocumentReference>()
+            .HasOne(r => r.Document)
+            .WithMany(d => d.DocumentReferences)
+            .HasForeignKey(r => r.DocumentID)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<DocumentReference>()
+            .Property(r => r.SortOrder)
+            .HasDefaultValue(0);
+
+        modelBuilder.Entity<DocumentReference>()
+            .HasIndex(r => new { r.DocumentID, r.SortOrder })
+            .HasDatabaseName("IX_DocumentReference_DocumentID_SortOrder");
 
         // Configure Folder self-reference
         modelBuilder.Entity<Folder>()
@@ -377,34 +405,6 @@ public class ApplicationDbContext : DbContext
             new SubscriptionPlan { PlanID = 2, PlanName = "Starter", Price = 999.00m, BillingCycle = "Monthly", MaxUsers = 35, MaxProjects = 100, IsActive = true },
             new SubscriptionPlan { PlanID = 3, PlanName = "Professional", Price = 2499.00m, BillingCycle = "Monthly", MaxUsers = 75, MaxProjects = 500, IsActive = true },
             new SubscriptionPlan { PlanID = 4, PlanName = "Enterprise", Price = 4999.00m, BillingCycle = "Monthly", MaxUsers = null, MaxProjects = null, IsActive = true }
-        );
-
-        // Seed Super Admin User (password: Thinkbridge@123 - BCrypt hashed)
-        modelBuilder.Entity<User>().HasData(
-            new User
-            {
-                UserID = 1,
-                CompanyID = null,
-                Fname = "Super",
-                Lname = "Admin",
-                Email = "superadmin@thinkbridge.com",
-                Password = "$2a$11$HAUg98czHouH.kt4CQcZbOE2GFiwGVnZF0gMv2GVY5lokSKReiDUy",
-                IsSuperAdmin = true,
-                Status = "Active",
-                MustChangePassword = false,
-                CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc)
-            }
-        );
-
-        // Assign Super Admin role
-        modelBuilder.Entity<UserRole>().HasData(
-            new UserRole
-            {
-                UserRoleID = 1,
-                UserID = 1,
-                RoleID = 1,
-                AssignedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc)
-            }
         );
     }
 }

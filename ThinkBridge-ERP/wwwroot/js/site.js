@@ -209,6 +209,7 @@
             if (!json.success) return;
 
             const list = document.getElementById('notification-list');
+            if (!list) return;
             const notifications = json.data || [];
 
             if (notifications.length === 0) {
@@ -216,23 +217,58 @@
                 return;
             }
 
-            list.innerHTML = notifications.map(n => {
-                const iconType = getNotifIconType(n.notifType);
+            list.innerHTML = '';
+            notifications.forEach(n => {
+                const notificationId = Number(n.notificationID);
+                const notifType = n && n.notifType != null ? String(n.notifType) : '';
+                const iconType = getNotifIconType(notifType);
                 const timeAgo = formatNotifTime(n.createdAt);
-                return `
-                    <div class="notification-item ${n.isRead ? '' : 'unread'}" data-notif-id="${n.notificationID}" data-notif-type="${n.notifType}" onclick="handleNotificationClick(${n.notificationID}, this)">
-                        <div class="notification-icon ${iconType.cssClass}">
-                            ${iconType.svg}
-                        </div>
-                        <div class="notification-content">
-                            <p>${n.message}</p>
-                            <span class="notification-time">${timeAgo}</span>
-                        </div>
-                        <button class="notif-delete-btn" onclick="event.stopPropagation(); deleteNotification(${n.notificationID}, this)" title="Delete">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                        </button>
-                    </div>`;
-            }).join('');
+
+                const item = document.createElement('div');
+                item.className = 'notification-item';
+                if (!n.isRead) item.classList.add('unread');
+                item.dataset.notifId = String(notificationId);
+                item.dataset.notifType = notifType;
+
+                item.addEventListener('click', function () {
+                    if (!Number.isFinite(notificationId)) return;
+                    window.handleNotificationClick(notificationId, item);
+                });
+
+                const icon = document.createElement('div');
+                icon.className = 'notification-icon ' + iconType.cssClass;
+                icon.innerHTML = iconType.svg;
+
+                const content = document.createElement('div');
+                content.className = 'notification-content';
+
+                const messageEl = document.createElement('p');
+                messageEl.textContent = n && n.message != null ? String(n.message) : '';
+
+                const timeEl = document.createElement('span');
+                timeEl.className = 'notification-time';
+                timeEl.textContent = String(timeAgo);
+
+                content.appendChild(messageEl);
+                content.appendChild(timeEl);
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'notif-delete-btn';
+                deleteBtn.title = 'Delete';
+                deleteBtn.type = 'button';
+                deleteBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+
+                deleteBtn.addEventListener('click', function (event) {
+                    event.stopPropagation();
+                    if (!Number.isFinite(notificationId)) return;
+                    window.deleteNotification(notificationId, deleteBtn);
+                });
+
+                item.appendChild(icon);
+                item.appendChild(content);
+                item.appendChild(deleteBtn);
+                list.appendChild(item);
+            });
 
             notificationsLoaded = true;
         } catch (e) { console.error('Failed to load notifications', e); }
@@ -528,7 +564,27 @@
         // Create toast
         const toast = document.createElement('div');
         toast.className = 'toast toast-' + type;
-        toast.innerHTML = `<span class="toast-icon">${icons[type] || icons.info}</span><span class="toast-message">${message}</span><button class="toast-close" onclick="this.parentElement.classList.add('toast-exit');setTimeout(()=>this.parentElement.remove(),300)">&times;</button>`;
+
+        const icon = document.createElement('span');
+        icon.className = 'toast-icon';
+        icon.textContent = icons[type] || icons.info;
+
+        const messageEl = document.createElement('span');
+        messageEl.className = 'toast-message';
+        messageEl.textContent = message == null ? '' : String(message);
+
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'toast-close';
+        closeBtn.type = 'button';
+        closeBtn.textContent = '×';
+        closeBtn.addEventListener('click', function () {
+            toast.classList.add('toast-exit');
+            setTimeout(function () { toast.remove(); }, 300);
+        });
+
+        toast.appendChild(icon);
+        toast.appendChild(messageEl);
+        toast.appendChild(closeBtn);
 
         toastContainer.appendChild(toast);
 
@@ -559,51 +615,122 @@
         const isAuthPage = !!document.querySelector('.sidebar');
         if (!isAuthPage) return;
 
-        const INACTIVITY_LIMIT = 20 * 60 * 1000; // 20 minutes in ms
-        const WARNING_BEFORE = 2 * 60 * 1000;     // Show warning 2 min before expiry
+        const INACTIVITY_LIMIT = 5 * 60 * 1000; // 5 minutes in ms
+        const WARNING_BEFORE = 2 * 60 * 1000;   // Show warning 2 min before expiry
+        const WARNING_AT = INACTIVITY_LIMIT - WARNING_BEFORE; // 3 minutes
+
         let inactivityTimer = null;
         let warningTimer = null;
-        let warningToast = null;
+        let countdownInterval = null;
+        let warningModal = null;
+        let countdownDisplay = null;
+        let stayLoggedInButton = null;
+        let lastActivityAt = Date.now();
+
+        function ensureWarningModal() {
+            if (warningModal) return;
+
+            warningModal = document.createElement('div');
+            warningModal.className = 'session-timeout-overlay';
+            warningModal.setAttribute('role', 'dialog');
+            warningModal.setAttribute('aria-modal', 'true');
+            warningModal.setAttribute('aria-labelledby', 'session-timeout-title');
+            warningModal.innerHTML = [
+                '<div class="modal modal-sm session-timeout-modal">',
+                '  <div class="modal-header">',
+                '    <h2 id="session-timeout-title">Session Inactivity Warning</h2>',
+                '  </div>',
+                '  <div class="modal-body">',
+                '    <p class="session-timeout-message">You\'ve been inactive for a while. Do you want to stay logged in?</p>',
+                '    <p class="session-timeout-countdown">For security, you will be logged out automatically in <strong id="session-timeout-remaining">02:00</strong>.</p>',
+                '  </div>',
+                '  <div class="modal-footer session-timeout-actions">',
+                '    <button type="button" class="btn btn-primary" id="session-timeout-stay">Stay Logged In</button>',
+                '    <button type="button" class="btn btn-outline-danger" id="session-timeout-logout">Logout</button>',
+                '  </div>',
+                '</div>'
+            ].join('');
+
+            document.body.appendChild(warningModal);
+            countdownDisplay = warningModal.querySelector('#session-timeout-remaining');
+            stayLoggedInButton = warningModal.querySelector('#session-timeout-stay');
+
+            stayLoggedInButton.addEventListener('click', function () {
+                lastActivityAt = Date.now();
+                resetTimers();
+            });
+
+            const logoutButton = warningModal.querySelector('#session-timeout-logout');
+            logoutButton.addEventListener('click', function () {
+                performLogout('You were logged out after inactivity.');
+            });
+        }
+
+        function formatRemaining(ms) {
+            const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+            const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
+            const seconds = String(totalSeconds % 60).padStart(2, '0');
+            return minutes + ':' + seconds;
+        }
+
+        function hideWarningModal() {
+            if (!warningModal) return;
+            warningModal.classList.remove('active');
+            if (countdownInterval) {
+                clearInterval(countdownInterval);
+                countdownInterval = null;
+            }
+        }
+
+        function updateCountdown() {
+            if (!countdownDisplay) return;
+            const elapsed = Date.now() - lastActivityAt;
+            const remaining = INACTIVITY_LIMIT - elapsed;
+
+            if (remaining <= 0) {
+                performLogout('Your session has expired due to inactivity.');
+                return;
+            }
+
+            countdownDisplay.textContent = formatRemaining(remaining);
+        }
+
+        function showSessionWarning() {
+            ensureWarningModal();
+            updateCountdown();
+            warningModal.classList.add('active');
+            if (stayLoggedInButton) {
+                stayLoggedInButton.focus();
+            }
+
+            if (countdownInterval) {
+                clearInterval(countdownInterval);
+            }
+            countdownInterval = setInterval(updateCountdown, 1000);
+        }
 
         function resetTimers() {
             clearTimeout(inactivityTimer);
             clearTimeout(warningTimer);
-            dismissWarning();
+            hideWarningModal();
 
-            // Warning toast at 18 minutes
+            // Warning modal at 3 minutes
             warningTimer = setTimeout(function () {
                 showSessionWarning();
-            }, INACTIVITY_LIMIT - WARNING_BEFORE);
+            }, WARNING_AT);
 
-            // Auto-logout at 20 minutes of inactivity
+            // Auto-logout at 5 minutes of inactivity
             inactivityTimer = setTimeout(function () {
                 performLogout('Your session has expired due to inactivity.');
             }, INACTIVITY_LIMIT);
         }
 
-        function showSessionWarning() {
-            if (warningToast) return;
-            let toastContainer = document.querySelector('.toast-container');
-            if (!toastContainer) {
-                toastContainer = document.createElement('div');
-                toastContainer.className = 'toast-container';
-                document.body.appendChild(toastContainer);
-            }
-            warningToast = document.createElement('div');
-            warningToast.className = 'toast toast-warning';
-            warningToast.innerHTML = '<span class="toast-icon">!</span><span class="toast-message">Your session will expire in 2 minutes due to inactivity.</span>';
-            toastContainer.appendChild(warningToast);
-        }
-
-        function dismissWarning() {
-            if (warningToast) {
-                warningToast.remove();
-                warningToast = null;
-            }
-        }
-
         function performLogout(message) {
             // Clear all client-side storage
+            if (countdownInterval) {
+                clearInterval(countdownInterval);
+                countdownInterval = null;
+            }
             sessionStorage.clear();
             localStorage.removeItem('sidebarCollapsed');
             localStorage.removeItem('tb_onboarding_done');
@@ -612,17 +739,46 @@
             window.location.href = '/Auth/Logout';
         }
 
-        // Track user activity (mouse, keyboard, scroll, touch)
-        var activityEvents = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart'];
+        // Track user activity (mouse, keyboard, navigation, scroll, touch)
+        var activityEvents = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart', 'click'];
         var throttled = false;
         activityEvents.forEach(function (evt) {
             document.addEventListener(evt, function () {
+                if (warningModal && warningModal.classList.contains('active')) {
+                    return;
+                }
                 if (!throttled) {
                     throttled = true;
+                    lastActivityAt = Date.now();
                     resetTimers();
-                    setTimeout(function () { throttled = false; }, 5000); // Throttle to every 5s
+                    setTimeout(function () { throttled = false; }, 3000); // Throttle to every 3s
                 }
             }, { passive: true });
+        });
+
+        window.addEventListener('focus', function () {
+            if (warningModal && warningModal.classList.contains('active')) {
+                return;
+            }
+            lastActivityAt = Date.now();
+            resetTimers();
+        });
+
+        window.addEventListener('popstate', function () {
+            lastActivityAt = Date.now();
+            resetTimers();
+        });
+
+        window.addEventListener('hashchange', function () {
+            lastActivityAt = Date.now();
+            resetTimers();
+        });
+
+        document.addEventListener('visibilitychange', function () {
+            if (!document.hidden && !(warningModal && warningModal.classList.contains('active'))) {
+                lastActivityAt = Date.now();
+                resetTimers();
+            }
         });
 
         // Start timers

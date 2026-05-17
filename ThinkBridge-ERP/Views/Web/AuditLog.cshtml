@@ -7,6 +7,17 @@
 }
 
 <div class="page-audit-log">
+    <div class="tabs-container audit-log-tabs" role="tablist" aria-label="Audit log type">
+        <button type="button" class="tab-btn active" id="audit-tab-system" role="tab" aria-selected="true" aria-controls="audit-log-panel" data-log-type="system">
+            System Logs
+            <span class="audit-log-tab-count" id="system-log-count" aria-hidden="true">0</span>
+        </button>
+        <button type="button" class="tab-btn" id="audit-tab-security" role="tab" aria-selected="false" aria-controls="audit-log-panel" data-log-type="security">
+            Security Logs
+            <span class="audit-log-tab-count" id="security-log-count" aria-hidden="true">0</span>
+        </button>
+    </div>
+
     <!-- Page Header -->
     <div class="page-header">
         <div class="header-filters">
@@ -108,7 +119,7 @@
     </div>
 
     <!-- Audit Log Table -->
-    <div class="audit-log-table-container">
+    <div class="audit-log-table-container" id="audit-log-panel" role="tabpanel" aria-labelledby="audit-tab-system">
         <table class="audit-log-table">
             <thead>
                 <tr>
@@ -121,9 +132,8 @@
             </thead>
             <tbody id="audit-log-body">
                 <tr>
-                    <td colspan="5" style="text-align:center; padding:2rem; color:var(--text-muted);">Loading audit
-                        logs...</td>
-                    </tr>
+                    <td colspan="5" class="audit-log-state-row">Loading audit logs...</td>
+                </tr>
                 </tbody>
             </table>
         </div>

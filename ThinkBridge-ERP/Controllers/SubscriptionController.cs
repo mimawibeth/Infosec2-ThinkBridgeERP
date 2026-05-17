@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Text.RegularExpressions;
 using ThinkBridge_ERP.Data;
+using ThinkBridge_ERP.Services;
 using ThinkBridge_ERP.Services.Interfaces;
 
 namespace ThinkBridge_ERP.Controllers;
@@ -11,17 +13,20 @@ public class SubscriptionController : Controller
     private readonly IPayMongoService _payMongoService;
     private readonly ApplicationDbContext _context;
     private readonly ILogger<SubscriptionController> _logger;
+    private readonly PasswordValidationService _passwordValidationService;
 
     public SubscriptionController(
         ISubscriptionService subscriptionService,
         IPayMongoService payMongoService,
         ApplicationDbContext context,
-        ILogger<SubscriptionController> logger)
+        ILogger<SubscriptionController> logger,
+        PasswordValidationService passwordValidationService)
     {
         _subscriptionService = subscriptionService;
         _payMongoService = payMongoService;
         _context = context;
         _logger = logger;
+        _passwordValidationService = passwordValidationService;
     }
 
     private static string GetDashboardUrl(string role)
@@ -163,17 +168,40 @@ public class SubscriptionController : Controller
         if (request == null)
             return Json(new { success = false, message = "Invalid request." });
 
-        if (string.IsNullOrWhiteSpace(request.CompanyName))
-            return Json(new { success = false, message = "Company name is required." });
+        request.CompanyName = request.CompanyName?.Trim() ?? string.Empty;
+        request.AdminFirstName = request.AdminFirstName?.Trim() ?? string.Empty;
+        request.AdminLastName = request.AdminLastName?.Trim() ?? string.Empty;
+        request.AdminEmail = request.AdminEmail?.Trim() ?? string.Empty;
+        request.Industry = request.Industry?.Trim();
+        request.AdminPhone = request.AdminPhone?.Trim();
 
-        if (string.IsNullOrWhiteSpace(request.AdminEmail))
-            return Json(new { success = false, message = "Email address is required." });
+        var fieldErrors = new Dictionary<string, string>();
 
-        if (!System.Text.RegularExpressions.Regex.IsMatch(request.AdminEmail, @"^[^@\s]+@[^@\s]+\.[^@\s]+$"))
-            return Json(new { success = false, message = "Please enter a valid email address." });
+        var companyValidationError = ValidateCompanyName(request.CompanyName);
+        if (!string.IsNullOrEmpty(companyValidationError))
+            fieldErrors["companyName"] = companyValidationError;
 
-        if (string.IsNullOrWhiteSpace(request.AdminFirstName) || string.IsNullOrWhiteSpace(request.AdminLastName))
-            return Json(new { success = false, message = "Admin name is required." });
+        var firstNameValidationError = ValidatePersonName(request.AdminFirstName, "First name");
+        if (!string.IsNullOrEmpty(firstNameValidationError))
+            fieldErrors["adminFirstName"] = firstNameValidationError;
+
+        var lastNameValidationError = ValidatePersonName(request.AdminLastName, "Last name");
+        if (!string.IsNullOrEmpty(lastNameValidationError))
+            fieldErrors["adminLastName"] = lastNameValidationError;
+
+        var emailValidationError = ValidateEmail(request.AdminEmail);
+        if (!string.IsNullOrEmpty(emailValidationError))
+            fieldErrors["adminEmail"] = emailValidationError;
+
+        if (fieldErrors.Count > 0)
+        {
+            return Json(new
+            {
+                success = false,
+                message = "Please correct the highlighted fields.",
+                fieldErrors
+            });
+        }
 
         if (string.IsNullOrWhiteSpace(request.AdminPassword))
             return Json(new { success = false, message = "Password is required." });
@@ -192,6 +220,9 @@ public class SubscriptionController : Controller
 
         if (!System.Text.RegularExpressions.Regex.IsMatch(request.AdminPassword, @"[^a-zA-Z0-9]"))
             return Json(new { success = false, message = "Password must include special characters." });
+
+        if (_passwordValidationService.IsBlacklisted(request.AdminPassword))
+            return Json(new { success = false, message = "This password is too common and has been blocked for security. Please choose a stronger password." });
 
         if (request.PlanId <= 0)
             return Json(new { success = false, message = "Please select a subscription plan." });
@@ -247,6 +278,71 @@ public class SubscriptionController : Controller
             planName = result.PlanName,
             message = "Redirecting to payment..."
         });
+    }
+
+    private static readonly Regex SignupEmailRegex = new(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex PersonNameRegex = new(@"^[A-Za-z][A-Za-z' -]{1,49}$", RegexOptions.Compiled);
+    private static readonly Regex CompanyNameRegex = new(@"^[A-Za-z0-9][A-Za-z0-9 .,'&()\-]{1,99}$", RegexOptions.Compiled);
+    private static readonly HashSet<string> FakeNameTokens = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "test", "asdf", "qwerty", "sample", "demo", "unknown", "none", "firstname", "lastname"
+    };
+
+    private static string? ValidateCompanyName(string companyName)
+    {
+        if (string.IsNullOrWhiteSpace(companyName))
+            return "Company name is required.";
+
+        if (companyName.Length < 2)
+            return "Company name must be at least 2 characters.";
+
+        if (companyName.Length > 100)
+            return "Company name must be 100 characters or fewer.";
+
+        if (!companyName.Any(char.IsLetter))
+            return "Company name must include at least one letter.";
+
+        if (!CompanyNameRegex.IsMatch(companyName))
+            return "Company name contains invalid characters.";
+
+        return null;
+    }
+
+    private static string? ValidatePersonName(string name, string label)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return $"{label} is required.";
+
+        if (name.Length < 2)
+            return $"{label} must be at least 2 characters.";
+
+        if (name.Length > 50)
+            return $"{label} must be 50 characters or fewer.";
+
+        if (!PersonNameRegex.IsMatch(name))
+            return $"{label} contains invalid characters.";
+
+        var token = NormalizeNameToken(name);
+        if (FakeNameTokens.Contains(token))
+            return $"Please enter a valid {label.ToLowerInvariant()}.";
+
+        return null;
+    }
+
+    private static string? ValidateEmail(string email)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+            return "Email address is required.";
+
+        if (!SignupEmailRegex.IsMatch(email))
+            return "Please enter a valid email address.";
+
+        return null;
+    }
+
+    private static string NormalizeNameToken(string name)
+    {
+        return new string(name.Where(char.IsLetter).ToArray()).ToLowerInvariant();
     }
 
     /// <summary>
@@ -400,10 +496,12 @@ public class SubscriptionController : Controller
     [Route("/api/subscription/renew")]
     [IgnoreAntiforgeryToken]
     [Microsoft.AspNetCore.Authorization.Authorize(Policy = "CompanyAdminOnly")]
-    public async Task<IActionResult> RenewSubscription([FromBody] RenewSubscriptionRequest request)
+    public async Task<IActionResult> RenewSubscription([FromBody] RenewSubscriptionRequest? request)
     {
-        if (request?.SubscriptionId <= 0)
+        if (request == null || request.SubscriptionId <= 0)
             return Json(new { success = false, message = "Invalid subscription." });
+
+        var renewRequest = request;
 
         var companyIdClaim = User.Claims.FirstOrDefault(c => c.Type == "CompanyID")?.Value;
         if (!int.TryParse(companyIdClaim, out var companyId) || companyId == 0)
@@ -412,7 +510,7 @@ public class SubscriptionController : Controller
         var subscription = await _context.Subscriptions
             .Include(s => s.Plan)
             .Include(s => s.Company)
-            .FirstOrDefaultAsync(s => s.SubscriptionID == request.SubscriptionId
+            .FirstOrDefaultAsync(s => s.SubscriptionID == renewRequest.SubscriptionId
                 && s.CompanyID == companyId);
 
         if (subscription == null)

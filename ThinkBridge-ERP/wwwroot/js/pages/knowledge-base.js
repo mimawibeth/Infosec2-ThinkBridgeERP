@@ -78,6 +78,30 @@
             });
         }
 
+        const addReferenceBtn = document.getElementById('add-reference-btn');
+        if (addReferenceBtn) {
+            addReferenceBtn.addEventListener('click', function () {
+                addReferenceRow();
+            });
+        }
+
+        const referencesList = document.getElementById('article-references-list');
+        if (referencesList) {
+            referencesList.addEventListener('click', function (event) {
+                const target = event.target.closest('.reference-remove-btn');
+                if (!target) return;
+
+                const row = target.closest('.reference-row');
+                if (row) {
+                    row.remove();
+                }
+
+                if (!referencesList.querySelector('.reference-row')) {
+                    addReferenceRow();
+                }
+            });
+        }
+
         // Add Category
         const addCategoryBtn = document.getElementById('add-category-btn');
         if (addCategoryBtn) {
@@ -381,6 +405,40 @@
                 tagsSection.style.display = 'none';
             }
 
+            // References
+            const referencesSection = document.getElementById('view-article-references-section');
+            const referencesContainer = document.getElementById('view-article-references');
+            if (a.references && a.references.length > 0) {
+                referencesSection.style.display = '';
+                referencesContainer.innerHTML = a.references
+                    .sort((x, y) => (x.sortOrder ?? 0) - (y.sortOrder ?? 0))
+                    .map((reference, index) => {
+                        const url = reference.url
+                            ? `<a href="${escapeHtml(reference.url)}" target="_blank" rel="noopener noreferrer" class="kb-reference-link">${escapeHtml(reference.url)}</a>`
+                            : '<span class="kb-reference-missing-url">No URL provided</span>';
+
+                        const metaParts = [reference.author, reference.sourceName, reference.publishedDateText]
+                            .filter(Boolean)
+                            .map(escapeHtml);
+
+                        return `
+                            <div class="kb-reference-item">
+                                <div class="kb-reference-index">${index + 1}</div>
+                                <div class="kb-reference-body">
+                                    <div class="kb-reference-title">${escapeHtml(reference.title || 'Untitled source')}</div>
+                                    <div class="kb-reference-meta">${metaParts.join(' • ')}</div>
+                                    <div class="kb-reference-url">${url}</div>
+                                    ${reference.notes ? `<p class="kb-reference-note">${escapeHtml(reference.notes)}</p>` : ''}
+                                </div>
+                            </div>
+                        `;
+                    })
+                    .join('');
+            } else {
+                referencesSection.style.display = '';
+                referencesContainer.innerHTML = '<p class="kb-no-references">No references added.</p>';
+            }
+
             // Show/hide action buttons based on role
             const editBtn = document.getElementById('view-edit-btn');
             const archiveBtn = document.getElementById('view-archive-btn');
@@ -441,8 +499,10 @@
                 document.getElementById('article-summary').value = a.description || '';
                 document.getElementById('article-content').value = a.content || '';
                 document.getElementById('article-tags').value = (a.tags || []).join(', ');
+                renderReferenceRows(a.references || []);
                 await populateProjectDropdown(a.projectID);
             } else {
+                renderReferenceRows([]);
                 await populateProjectDropdown();
             }
         } else {
@@ -453,6 +513,7 @@
             document.getElementById('article-summary').value = '';
             document.getElementById('article-content').value = '';
             document.getElementById('article-tags').value = '';
+            renderReferenceRows([]);
             await populateProjectDropdown();
         }
 
@@ -511,6 +572,7 @@
         const content = document.getElementById('article-content').value.trim();
         const tagsRaw = document.getElementById('article-tags').value.trim();
         const tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(t => t) : [];
+        const references = collectReferenceRows();
         const projectIdVal = document.getElementById('article-project')?.value;
         const projectId = projectIdVal ? parseInt(projectIdVal) : null;
 
@@ -524,6 +586,7 @@
                 // Update
                 result = await apiPut(`${API_BASE}/articles/${formId}`, {
                     title, description, content, folderId, tags,
+                    references,
                     projectId,
                     submitForApproval: !asDraft
                 });
@@ -531,6 +594,7 @@
                 // Create
                 result = await apiPost(`${API_BASE}/articles`, {
                     title, description, content, folderId, tags,
+                    references,
                     projectId,
                     fileType: 'Article',
                     saveAsDraft: asDraft
@@ -556,6 +620,86 @@
             showToast('Failed to save article', 'error');
             console.error(err);
         }
+    }
+
+    function renderReferenceRows(references) {
+        const list = document.getElementById('article-references-list');
+        if (!list) return;
+
+        list.innerHTML = '';
+        const rows = Array.isArray(references) ? references : [];
+        if (!rows.length) {
+            addReferenceRow();
+            return;
+        }
+
+        rows
+            .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+            .forEach(reference => addReferenceRow(reference));
+    }
+
+    function addReferenceRow(reference) {
+        const list = document.getElementById('article-references-list');
+        if (!list) return;
+
+        const row = document.createElement('div');
+        row.className = 'reference-row';
+        row.innerHTML = `
+            <div class="reference-row-grid">
+                <div class="form-group">
+                    <label>Source Title</label>
+                    <input type="text" class="form-input ref-title" maxlength="300" placeholder="Article, guideline, or study title" value="${escapeHtml(reference?.title || '')}" />
+                </div>
+                <div class="form-group">
+                    <label>URL</label>
+                    <input type="url" class="form-input ref-url" maxlength="2048" placeholder="https://example.com/source" value="${escapeHtml(reference?.url || '')}" />
+                </div>
+            </div>
+            <div class="reference-row-grid reference-row-grid-meta">
+                <div class="form-group">
+                    <label>Author / Organization</label>
+                    <input type="text" class="form-input ref-author" maxlength="200" placeholder="WHO, NIST, CDC, journal author" value="${escapeHtml(reference?.author || '')}" />
+                </div>
+                <div class="form-group">
+                    <label>Publication / Source</label>
+                    <input type="text" class="form-input ref-source-name" maxlength="200" placeholder="Journal, standard, publication" value="${escapeHtml(reference?.sourceName || '')}" />
+                </div>
+                <div class="form-group">
+                    <label>Published Date / Year</label>
+                    <input type="text" class="form-input ref-published" maxlength="50" placeholder="2025 or Jan 2025" value="${escapeHtml(reference?.publishedDateText || '')}" />
+                </div>
+            </div>
+            <div class="reference-row-footer">
+                <div class="form-group">
+                    <label>Note (optional)</label>
+                    <textarea class="form-textarea ref-notes" rows="2" maxlength="500" placeholder="Why this source is relevant">${escapeHtml(reference?.notes || '')}</textarea>
+                </div>
+                <button type="button" class="btn btn-sm btn-secondary reference-remove-btn">Remove</button>
+            </div>
+        `;
+
+        list.appendChild(row);
+    }
+
+    function collectReferenceRows() {
+        const rows = Array.from(document.querySelectorAll('#article-references-list .reference-row'));
+        return rows
+            .map((row, index) => ({
+                title: row.querySelector('.ref-title')?.value.trim() || '',
+                url: row.querySelector('.ref-url')?.value.trim() || '',
+                author: row.querySelector('.ref-author')?.value.trim() || '',
+                sourceName: row.querySelector('.ref-source-name')?.value.trim() || '',
+                publishedDateText: row.querySelector('.ref-published')?.value.trim() || '',
+                notes: row.querySelector('.ref-notes')?.value.trim() || '',
+                sortOrder: index
+            }))
+            .filter(reference =>
+                reference.title
+                || reference.url
+                || reference.author
+                || reference.sourceName
+                || reference.publishedDateText
+                || reference.notes);
     }
 
     function archiveArticle(docId) {

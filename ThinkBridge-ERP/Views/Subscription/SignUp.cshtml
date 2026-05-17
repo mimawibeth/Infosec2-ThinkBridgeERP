@@ -9,6 +9,7 @@
 @section PageStyles {
     <link rel="stylesheet" href="~/css/pages/login.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/css/pages/landing.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/css/pages/signup.css" asp-append-version="true" />
 }
 
 <a href="/" class="back-to-home-btn">
@@ -131,6 +132,7 @@
                                 <label for="companyName">Company Name <span class="required">*</span></label>
                                 <input type="text" id="companyName" class="form-input" placeholder="e.g. Acme Corporation"
                                        required />
+                                <span class="field-error-text" id="companyNameError"></span>
                             </div>
                             <div class="form-group">
                                 <label for="industry">Industry</label>
@@ -153,10 +155,12 @@
                                 <label for="adminFirstName">First Name <span class="required">*</span></label>
                                 <input type="text" id="adminFirstName" class="form-input" placeholder="First name"
                                        required />
+                                <span class="field-error-text" id="adminFirstNameError"></span>
                             </div>
                             <div class="form-group">
                                 <label for="adminLastName">Last Name <span class="required">*</span></label>
                                 <input type="text" id="adminLastName" class="form-input" placeholder="Last name" required />
+                                <span class="field-error-text" id="adminLastNameError"></span>
                             </div>
                         </div>
                         <div class="signup-form-row">
@@ -167,6 +171,7 @@
                                 <small
                                     style="color: var(--text-muted, #888); font-size: 0.78rem; margin-top: 2px; display: block;">This
                                     will be your login email for the system.</small>
+                                <span class="field-error-text" id="adminEmailError"></span>
                                 </div>
                                 <div class="form-group">
                                     <label for="adminPhone">Phone Number</label>
@@ -576,6 +581,110 @@
                                     return null;
                                 }
 
+                                const fakeNameTokens = new Set(['test', 'asdf', 'qwerty', 'sample', 'demo', 'unknown', 'none', 'firstname', 'lastname']);
+
+                                function clearFieldError(fieldId) {
+                                    const field = document.getElementById(fieldId);
+                                    const errorEl = document.getElementById(fieldId + 'Error');
+                                    if (field) {
+                                        field.classList.remove('input-invalid');
+                                    }
+                                    if (errorEl) {
+                                        errorEl.textContent = '';
+                                        errorEl.classList.remove('active');
+                                    }
+                                }
+
+                                function setFieldError(fieldId, message) {
+                                    const field = document.getElementById(fieldId);
+                                    const errorEl = document.getElementById(fieldId + 'Error');
+                                    if (field) {
+                                        field.classList.add('input-invalid');
+                                    }
+                                    if (errorEl) {
+                                        errorEl.textContent = message;
+                                        errorEl.classList.add('active');
+                                    }
+                                }
+
+                                function normalizeNameToken(value) {
+                                    return value.toLowerCase().replace(/[^a-z]/g, '');
+                                }
+
+                                function validateCompanyName(value) {
+                                    if (!value) return 'Company name is required.';
+                                    if (value.length < 2) return 'Company name must be at least 2 characters.';
+                                    if (value.length > 100) return 'Company name must be 100 characters or fewer.';
+                                    if (!/[A-Za-z]/.test(value)) return 'Company name must include at least one letter.';
+                                    if (!/^[A-Za-z0-9][A-Za-z0-9 .,'&()\-]{1,99}$/.test(value)) return 'Company name contains invalid characters.';
+                                    return null;
+                                }
+
+                                function validatePersonName(value, label) {
+                                    if (!value) return label + ' is required.';
+                                    if (value.length < 2) return label + ' must be at least 2 characters.';
+                                    if (value.length > 50) return label + ' must be 50 characters or fewer.';
+                                    if (!/^[A-Za-z][A-Za-z' -]{1,49}$/.test(value)) return label + ' contains invalid characters.';
+
+                                    const token = normalizeNameToken(value);
+                                    if (fakeNameTokens.has(token)) {
+                                        return 'Please enter a valid ' + label.toLowerCase() + '.';
+                                    }
+
+                                    return null;
+                                }
+
+                                function validateEmail(value) {
+                                    if (!value) return 'Email address is required.';
+                                    if (!/^[^\s@@]+@@[^\s@@]+\.[^\s@@]+$/.test(value)) return 'Please enter a valid email address.';
+                                    return null;
+                                }
+
+                                function validateStep1Fields() {
+                                    const companyName = document.getElementById('companyName').value.trim();
+                                    const firstName = document.getElementById('adminFirstName').value.trim();
+                                    const lastName = document.getElementById('adminLastName').value.trim();
+                                    const adminEmail = document.getElementById('adminEmail').value.trim();
+
+                                    document.getElementById('companyName').value = companyName;
+                                    document.getElementById('adminFirstName').value = firstName;
+                                    document.getElementById('adminLastName').value = lastName;
+                                    document.getElementById('adminEmail').value = adminEmail;
+
+                                    clearFieldError('companyName');
+                                    clearFieldError('adminFirstName');
+                                    clearFieldError('adminLastName');
+                                    clearFieldError('adminEmail');
+
+                                    let hasErrors = false;
+
+                                    const companyError = validateCompanyName(companyName);
+                                    if (companyError) {
+                                        setFieldError('companyName', companyError);
+                                        hasErrors = true;
+                                    }
+
+                                    const firstNameError = validatePersonName(firstName, 'First name');
+                                    if (firstNameError) {
+                                        setFieldError('adminFirstName', firstNameError);
+                                        hasErrors = true;
+                                    }
+
+                                    const lastNameError = validatePersonName(lastName, 'Last name');
+                                    if (lastNameError) {
+                                        setFieldError('adminLastName', lastNameError);
+                                        hasErrors = true;
+                                    }
+
+                                    const emailError = validateEmail(adminEmail);
+                                    if (emailError) {
+                                        setFieldError('adminEmail', emailError);
+                                        hasErrors = true;
+                                    }
+
+                                    return !hasErrors;
+                                }
+
                                 // Real-time password checklist
                                 document.getElementById('adminPassword').addEventListener('input', function () {
                                     const pw = this.value;
@@ -610,19 +719,12 @@
                                 function goToStep(step) {
                                     if (step === 2) {
                                         // Validate step 1
-                                        const companyName = document.getElementById('companyName').value.trim();
-                                        const firstName = document.getElementById('adminFirstName').value.trim();
-                                        const lastName = document.getElementById('adminLastName').value.trim();
                                         const password = document.getElementById('adminPassword').value;
                                         const confirmPassword = document.getElementById('adminPasswordConfirm').value;
 
-                                        const adminEmail = document.getElementById('adminEmail').value.trim();
-
-                                        if (!companyName) { showModal('Please enter your company name.'); return; }
-                                        if (!adminEmail) { showModal('Please enter your email address.'); return; }
-                                        if (!/^[^\s@@]+@@[^\s@@]+\.[^\s@@]+$/.test(adminEmail)) { showModal('Please enter a valid email address.'); return; }
-                                        if (!firstName) { showModal('Please enter admin first name.'); return; }
-                                        if (!lastName) { showModal('Please enter admin last name.'); return; }
+                                        if (!validateStep1Fields()) {
+                                            return;
+                                        }
 
                                         const pwError = validatePassword(password);
                                         if (pwError) { showModal(pwError); return; }
@@ -643,6 +745,11 @@
                                 }
 
                                 async function submitRegistration() {
+                                    if (!validateStep1Fields()) {
+                                        goToStep(1);
+                                        return;
+                                    }
+
                                     if (!selectedPlanId || selectedPlanId === 0) {
                                         showError('Please select a subscription plan.');
                                         return;
@@ -679,6 +786,14 @@
                                         const result = await response.json();
 
                                         if (!result.success) {
+                                            if (result.fieldErrors) {
+                                                if (result.fieldErrors.companyName) setFieldError('companyName', result.fieldErrors.companyName);
+                                                if (result.fieldErrors.adminFirstName) setFieldError('adminFirstName', result.fieldErrors.adminFirstName);
+                                                if (result.fieldErrors.adminLastName) setFieldError('adminLastName', result.fieldErrors.adminLastName);
+                                                if (result.fieldErrors.adminEmail) setFieldError('adminEmail', result.fieldErrors.adminEmail);
+                                                goToStep(1);
+                                            }
+
                                             showError(result.message);
                                             resetButton();
                                             return;
@@ -707,6 +822,34 @@
                                         resetButton();
                                     }
                                 }
+
+                                ['companyName', 'adminFirstName', 'adminLastName', 'adminEmail'].forEach(fieldId => {
+                                    const field = document.getElementById(fieldId);
+                                    if (!field) {
+                                        return;
+                                    }
+
+                                    field.addEventListener('input', function () {
+                                        const value = this.value.trim();
+                                        let error = null;
+
+                                        if (fieldId === 'companyName') {
+                                            error = validateCompanyName(value);
+                                        } else if (fieldId === 'adminEmail') {
+                                            error = validateEmail(value);
+                                        } else if (fieldId === 'adminFirstName') {
+                                            error = validatePersonName(value, 'First name');
+                                        } else if (fieldId === 'adminLastName') {
+                                            error = validatePersonName(value, 'Last name');
+                                        }
+
+                                        if (error) {
+                                            setFieldError(fieldId, error);
+                                        } else {
+                                            clearFieldError(fieldId);
+                                        }
+                                    });
+                                });
 
                                 function showError(msg) {
                                     const el = document.getElementById('registrationError');

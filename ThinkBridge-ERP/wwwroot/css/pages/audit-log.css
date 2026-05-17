@@ -11,6 +11,30 @@
     gap: var(--spacing-lg);
 }
 
+.audit-log-tabs {
+    margin-bottom: 0;
+}
+
+.audit-log-tab-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: var(--radius-full);
+    background: var(--border-light);
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-left: var(--spacing-xs);
+}
+
+.tab-btn.active .audit-log-tab-count {
+    background: var(--blue-lightest);
+    color: var(--primary-blue);
+}
+
 /* Page Header */
 .page-header {
     display: flex;
@@ -191,6 +215,16 @@
     vertical-align: middle;
 }
 
+.audit-log-state-row {
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-muted);
+}
+
+.audit-log-state-error {
+    color: var(--danger);
+}
+
 /* Timestamp Column */
 .timestamp {
     display: flex;
@@ -339,6 +373,11 @@
 }
 
 @media (max-width: 768px) {
+    .audit-log-tabs {
+        overflow-x: auto;
+        white-space: nowrap;
+    }
+
     .page-header {
         flex-direction: column;
         align-items: stretch;

@@ -16,13 +16,6 @@ namespace ThinkBridge_ERP.Migrations
                 type: "int",
                 nullable: true);
 
-            migrationBuilder.UpdateData(
-                table: "User",
-                keyColumn: "UserID",
-                keyValue: 1,
-                column: "Password",
-                value: "$2a$11$HAUg98czHouH.kt4CQcZbOE2GFiwGVnZF0gMv2GVY5lokSKReiDUy");
-
             migrationBuilder.CreateIndex(
                 name: "IX_Product_ProjectID",
                 table: "Product",
@@ -51,13 +44,6 @@ namespace ThinkBridge_ERP.Migrations
             migrationBuilder.DropColumn(
                 name: "ProjectID",
                 table: "Product");
-
-            migrationBuilder.UpdateData(
-                table: "User",
-                keyColumn: "UserID",
-                keyValue: 1,
-                column: "Password",
-                value: "Admin@123");
         }
     }
 }

@@ -5,7 +5,7 @@
 namespace ThinkBridge_ERP.Migrations
 {
     /// <inheritdoc />
-    public partial class clouddb : Migration
+    public partial class CloudDb : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)

@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ThinkBridge_ERP.Services.Interfaces;
 
 namespace ThinkBridge_ERP.Services;
@@ -11,7 +12,14 @@ public class EmailService : IEmailService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<EmailService> _logger;
 
-    private const string RESEND_API_URL = "https://api.resend.com/emails";
+    private const string ResendApiUrl = "https://api.resend.com/emails";
+    private const string DefaultFromEmail = "ThinkBridge ERP <onboarding@resend.dev>";
+
+    private static readonly JsonSerializerOptions ResendJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
 
     public EmailService(
         IConfiguration config,
@@ -26,52 +34,107 @@ public class EmailService : IEmailService
     /// <summary>
     /// Sends a password reset email with the temporary password via Resend API.
     /// </summary>
-    public async Task<bool> SendPasswordResetEmailAsync(string toEmail, string firstName, string temporaryPassword)
+    public async Task<EmailSendResult> SendPasswordResetEmailAsync(string toEmail, string firstName, string temporaryPassword)
     {
         try
         {
-            var apiKey = _config["Resend:ApiKey"];
-            if (string.IsNullOrEmpty(apiKey))
+            var apiKey = GetResendApiKey();
+            if (apiKey == null)
             {
-                _logger.LogWarning("Resend API key is not configured. Skipping email send.");
-                return false;
+                _logger.LogWarning(
+                    "Resend API key is not configured. Environment={Environment}. Set Resend:ApiKey (User Secrets / appsettings) or env var Resend__ApiKey / RESEND_API_KEY.",
+                    _config["ASPNETCORE_ENVIRONMENT"] ?? _config["DOTNET_ENVIRONMENT"] ?? "(unknown)");
+                return EmailSendResult.Fail("Email service is not configured. Please contact your administrator.");
             }
 
-            var fromEmail = _config["Resend:FromEmail"] ?? "ThinkBridge ERP <onboarding@resend.dev>";
-
+            var fromEmail = GetResendFromEmail();
             var client = _httpClientFactory.CreateClient();
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
-            var emailBody = new
+            var payload = new ResendEmailPayload
             {
-                from = fromEmail,
-                to = new[] { toEmail },
-                subject = "ThinkBridge ERP - Your Password Has Been Reset",
-                html = BuildPasswordResetHtml(firstName, temporaryPassword)
+                From = fromEmail,
+                To = [toEmail.Trim()],
+                Subject = "ThinkBridge ERP - Your Password Has Been Reset",
+                Html = BuildPasswordResetHtml(firstName, temporaryPassword)
             };
 
             var jsonContent = new StringContent(
-                JsonSerializer.Serialize(emailBody),
+                JsonSerializer.Serialize(payload, ResendJsonOptions),
                 Encoding.UTF8,
                 "application/json");
 
-            var response = await client.PostAsync(RESEND_API_URL, jsonContent);
+            var response = await client.PostAsync(ResendApiUrl, jsonContent);
             var responseBody = await response.Content.ReadAsStringAsync();
 
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogError("Resend API error: {StatusCode} - {Body}", response.StatusCode, responseBody);
-                return false;
+                return EmailSendResult.Fail(MapResendError(responseBody));
             }
 
             _logger.LogInformation("Password reset email sent to {Email}", toEmail);
-            return true;
+            return EmailSendResult.Ok();
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error sending password reset email to {Email}", toEmail);
-            return false;
+            return EmailSendResult.Fail("Unable to send the reset email right now. Please try again later.");
         }
+    }
+
+    private static string MapResendError(string responseBody)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(responseBody);
+            if (doc.RootElement.TryGetProperty("message", out var messageElement))
+            {
+                var message = messageElement.GetString();
+                if (!string.IsNullOrWhiteSpace(message))
+                {
+                    if (message.Contains("only send testing emails to your own email", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return "Password reset email could not be delivered. Resend test mode only allows delivery to the email on your Resend account, or you must verify a domain at resend.com/domains.";
+                    }
+
+                    return message;
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // Fall through to generic message.
+        }
+
+        return "Unable to send the reset email. Please try again later or contact your administrator.";
+    }
+
+    private string? GetResendApiKey()
+    {
+        foreach (var key in new[] { "Resend:ApiKey", "RESEND_API_KEY", "RESEND_APIKEY" })
+        {
+            var value = _config[key];
+            if (!string.IsNullOrWhiteSpace(value))
+                return value.Trim();
+        }
+
+        return null;
+    }
+
+    private string GetResendFromEmail()
+    {
+        var from = _config["Resend:FromEmail"]
+            ?? _config["RESEND_FROM_EMAIL"];
+        return string.IsNullOrWhiteSpace(from) ? DefaultFromEmail : from.Trim();
+    }
+
+    private sealed class ResendEmailPayload
+    {
+        public required string From { get; init; }
+        public required string[] To { get; init; }
+        public required string Subject { get; init; }
+        public required string Html { get; init; }
     }
 
     private static string BuildPasswordResetHtml(string firstName, string temporaryPassword)
@@ -104,7 +167,7 @@ public class EmailService : IEmailService
                                 Hi {System.Net.WebUtility.HtmlEncode(firstName)},
                             </p>
                             <p style=""margin:0 0 20px; color:#64748b; font-size:14px; line-height:1.6;"">
-                                Your password has been reset by your company administrator. Please use the temporary password below to log in, and you will be prompted to create a new password.
+                                Your password has been reset. Please use the temporary password below to log in, and you will be prompted to create a new password.
                             </p>
                             <!-- Password Box -->
                             <div style=""background-color:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; padding:20px; text-align:center; margin:24px 0;"">
