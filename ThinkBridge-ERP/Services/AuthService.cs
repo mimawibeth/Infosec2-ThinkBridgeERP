@@ -9,8 +9,8 @@ namespace ThinkBridge_ERP.Services;
 public class AuthService : IAuthService
 {
     private const int MaxFailedAttemptsPerStage = 5;
-    private const int FirstLockoutMinutes = 15;
-    private const int SecondLockoutMinutes = 30;
+    private const int FirstLockoutMinutes = 5;
+    private const int SecondLockoutMinutes = 10;
 
     private readonly ApplicationDbContext _context;
     private readonly ILogger<AuthService> _logger;
@@ -58,7 +58,7 @@ public class AuthService : IAuthService
             // Check if account is locked out
             if (user.LockoutEnd.HasValue && user.LockoutEnd.Value > DateTime.UtcNow)
             {
-                var remaining = (int)Math.Ceiling((user.LockoutEnd.Value - DateTime.UtcNow).TotalSeconds);
+                var remaining = Math.Max(1, (int)Math.Ceiling((user.LockoutEnd.Value - DateTime.UtcNow).TotalSeconds));
                 await TryWriteSecurityAuditAsync(user, "LoginBlockedTemporaryLockout", ipAddress);
                 _logger.LogWarning("Login attempt failed: User {Email} is locked out for {Seconds}s", email, remaining);
                 return new AuthResult
@@ -86,7 +86,7 @@ public class AuthService : IAuthService
                         await _context.SaveChangesAsync();
                         await TryWriteSecurityAuditAsync(user, "LoginLockoutLevel1Triggered", ipAddress);
 
-                        var firstLockoutSecs = (int)Math.Ceiling((user.LockoutEnd.Value - DateTime.UtcNow).TotalSeconds);
+                        var firstLockoutSecs = Math.Max(1, (int)Math.Ceiling((user.LockoutEnd.Value - DateTime.UtcNow).TotalSeconds));
                         _logger.LogWarning("User {Email} entered first lockout stage for {Minutes} minutes", email, FirstLockoutMinutes);
 
                         return new AuthResult
@@ -107,7 +107,7 @@ public class AuthService : IAuthService
                         await _context.SaveChangesAsync();
                         await TryWriteSecurityAuditAsync(user, "LoginLockoutLevel2Triggered", ipAddress);
 
-                        var secondLockoutSecs = (int)Math.Ceiling((user.LockoutEnd.Value - DateTime.UtcNow).TotalSeconds);
+                        var secondLockoutSecs = Math.Max(1, (int)Math.Ceiling((user.LockoutEnd.Value - DateTime.UtcNow).TotalSeconds));
                         _logger.LogWarning("User {Email} entered second lockout stage for {Minutes} minutes", email, SecondLockoutMinutes);
 
                         return new AuthResult
@@ -140,23 +140,18 @@ public class AuthService : IAuthService
                 await _context.SaveChangesAsync();
                 await TryWriteSecurityAuditAsync(user, $"LoginFailedInvalidPasswordAttempt{user.FailedLoginAttempts}", ipAddress);
 
-                _logger.LogWarning("Login attempt failed: Invalid password for user {Email} (attempt {Attempts})", email, user.FailedLoginAttempts);
+                var attemptsRemaining = Math.Max(0, MaxFailedAttemptsPerStage - user.FailedLoginAttempts);
+                _logger.LogWarning("Login attempt failed: Invalid password for user {Email} (attempt {Attempts}, {Remaining} remaining before lockout)", email, user.FailedLoginAttempts, attemptsRemaining);
 
                 return new AuthResult
                 {
                     Success = false,
-                    ErrorMessage = "Invalid email or password.",
+                    ErrorMessage = attemptsRemaining > 0
+                        ? $"Invalid email or password. {attemptsRemaining} attempt(s) remaining before temporary lockout."
+                        : "Invalid email or password.",
                     ErrorCode = "invalid_credentials",
                     LockoutSeconds = 0
                 };
-            }
-
-            // Reset failed attempts on successful login
-            if (user.FailedLoginAttempts > 0 || user.LockoutEnd.HasValue)
-            {
-                user.FailedLoginAttempts = 0;
-                user.LockoutEnd = null;
-                await _context.SaveChangesAsync();
             }
 
             // Check account status only after password verification to avoid exposing account state.
@@ -196,6 +191,14 @@ public class AuthService : IAuthService
                     ErrorCode = "account_inactive",
                     ErrorMessage = "Your account is not active. Please contact your administrator."
                 };
+            }
+
+            // Reset failed attempts only after password and account status checks pass
+            if (user.FailedLoginAttempts > 0 || user.LockoutEnd.HasValue)
+            {
+                user.FailedLoginAttempts = 0;
+                user.LockoutEnd = null;
+                await _context.SaveChangesAsync();
             }
 
             // Get user roles

@@ -559,6 +559,78 @@
                                                                                 return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
                                                                             };
 
+                                                                            const clearLockoutTimer = () => {
+                                                                                if (window._lockoutTimer) {
+                                                                                    clearInterval(window._lockoutTimer);
+                                                                                    window._lockoutTimer = null;
+                                                                                }
+                                                                            };
+
+                                                                            const isPermanentLockout = (payload) => {
+                                                                                if (!payload) {
+                                                                                    return false;
+                                                                                }
+
+                                                                                if (payload.errorCode === 'permanent_lockout') {
+                                                                                    return true;
+                                                                                }
+
+                                                                                const message = (payload.message || '').toLowerCase();
+                                                                                return message.includes('permanently locked');
+                                                                            };
+
+                                                                            const buildLockoutMessage = (serverMessage) => {
+                                                                                const base = (serverMessage || 'Too many failed login attempts.').trim();
+                                                                                if (base.includes('{time}')) {
+                                                                                    return base;
+                                                                                }
+
+                                                                                return `${base} Please try again after {time}.`;
+                                                                            };
+
+                                                                            const showPermanentLockout = (message) => {
+                                                                                clearLockoutTimer();
+                                                                                window._permanentLockout = true;
+                                                                                hideRenewSubscriptionCta();
+                                                                                showError(message || 'Your account has been permanently locked. Please contact your administrator.');
+                                                                                loginBtn.disabled = true;
+                                                                                loginBtn.classList.add('is-locked');
+                                                                                loginBtn.innerHTML = 'Account locked — contact administrator';
+                                                                            };
+
+                                                                            const getLockoutSecondsFromResult = (payload) => {
+                                                                                const raw = payload?.lockoutSeconds ?? payload?.LockoutSeconds ?? 0;
+                                                                                const parsed = Number(raw);
+                                                                                return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
+                                                                            };
+
+                                                                            const handleAuthFailure = (payload) => {
+                                                                                const lockoutSeconds = getLockoutSecondsFromResult(payload);
+
+                                                                                if (isPermanentLockout(payload)) {
+                                                                                    showPermanentLockout(payload.message);
+                                                                                    return;
+                                                                                }
+
+                                                                                if (lockoutSeconds > 0 || payload?.errorCode === 'temporary_lockout') {
+                                                                                    const seconds = lockoutSeconds > 0
+                                                                                        ? lockoutSeconds
+                                                                                        : 60;
+                                                                                    startLockoutTimer(seconds, payload?.message);
+                                                                                    return;
+                                                                                }
+
+                                                                                showError(payload?.message || 'Login failed. Please try again.');
+
+                                                                                if (payload?.errorCode === 'subscription_expired' && payload?.canRenewSubscription && payload?.renewalToken) {
+                                                                                    showRenewSubscriptionCta(payload.renewalToken);
+                                                                                } else {
+                                                                                    hideRenewSubscriptionCta();
+                                                                                }
+
+                                                                                setPrimaryButtonState(false, '');
+                                                                            };
+
                                                                             const hideRenewSubscriptionCta = () => {
                                                                                 renewalToken = '';
                                                                                 renewSubscriptionCta.style.display = 'none';
@@ -583,6 +655,9 @@
 
                                                                             const setPrimaryButtonState = (loading, label) => {
                                                                                 loginBtn.disabled = loading;
+                                                                                if (!loading) {
+                                                                                    loginBtn.classList.remove('is-locked');
+                                                                                }
                                                                                 loginBtn.innerHTML = loading
                                                                                     ? `<span class="spinner"></span> ${label}`
                                                                                     : getPrimaryButtonIdleLabel();
@@ -678,28 +753,33 @@
                                                                                 setPrimaryButtonState(false, '');
                                                                             };
 
-                                                                            const startLockoutTimer = (seconds, message) => {
-                                                                                if (window._lockoutTimer) {
-                                                                                    clearInterval(window._lockoutTimer);
-                                                                                    window._lockoutTimer = null;
-                                                                                }
+                                                                            const startLockoutTimer = (seconds, serverMessage) => {
+                                                                                clearLockoutTimer();
+                                                                                window._permanentLockout = false;
 
-                                                                                let remainingSeconds = seconds;
-                                                                                showError(message.replace('{time}', formatLockoutTime(remainingSeconds)));
-                                                                                loginBtn.disabled = true;
-                                                                                loginBtn.innerHTML = `Locked (${formatLockoutTime(remainingSeconds)})`;
+                                                                                const message = buildLockoutMessage(serverMessage);
+                                                                                let remainingSeconds = Math.max(0, Math.floor(seconds));
+
+                                                                                const updateLockoutUi = () => {
+                                                                                    const formatted = formatLockoutTime(remainingSeconds);
+                                                                                    showError(message.replace('{time}', formatted));
+                                                                                    loginBtn.disabled = true;
+                                                                                    loginBtn.classList.add('is-locked');
+                                                                                    loginBtn.innerHTML = `Locked (${formatted})`;
+                                                                                };
+
+                                                                                updateLockoutUi();
 
                                                                                 window._lockoutTimer = setInterval(() => {
                                                                                     remainingSeconds--;
                                                                                     if (remainingSeconds <= 0) {
-                                                                                        clearInterval(window._lockoutTimer);
-                                                                                        window._lockoutTimer = null;
+                                                                                        clearLockoutTimer();
+                                                                                        loginBtn.classList.remove('is-locked');
                                                                                         hideError();
                                                                                         loginBtn.disabled = false;
                                                                                         loginBtn.innerHTML = getPrimaryButtonIdleLabel();
                                                                                     } else {
-                                                                                        showError(message.replace('{time}', formatLockoutTime(remainingSeconds)));
-                                                                                        loginBtn.innerHTML = `Locked (${formatLockoutTime(remainingSeconds)})`;
+                                                                                        updateLockoutUi();
                                                                                     }
                                                                                 }, 1000);
                                                                             };
@@ -764,10 +844,15 @@
                                                                             loginForm.addEventListener('submit', async function (e) {
                                                                                 e.preventDefault();
 
+                                                                                if (window._permanentLockout) {
+                                                                                    return;
+                                                                                }
+
                                                                                 if (window._lockoutTimer) {
                                                                                     return;
                                                                                 }
 
+                                                                                clearLockoutTimer();
                                                                                 hideError();
 
                                                                                 if (pendingMfaToken) {
@@ -811,15 +896,7 @@
                                                                                             return;
                                                                                         }
 
-                                                                                        if (mfaResult.lockoutSeconds > 0) {
-                                                                                            startLockoutTimer(
-                                                                                                mfaResult.lockoutSeconds,
-                                                                                                'Too many invalid verification attempts. Please try again after {time}.'
-                                                                                            );
-                                                                                        } else {
-                                                                                            showError(mfaResult.message || 'Verification failed. Please try again.');
-                                                                                            setPrimaryButtonState(false, '');
-                                                                                        }
+                                                                                        handleAuthFailure(mfaResult);
                                                                                     } catch (error) {
                                                                                         console.error('MFA verification error:', error);
                                                                                         showError('An error occurred while verifying your code. Please try again.');
@@ -893,22 +970,7 @@
                                                                                         return;
                                                                                     }
 
-                                                                                    if (result.lockoutSeconds > 0) {
-                                                                                        startLockoutTimer(
-                                                                                            result.lockoutSeconds,
-                                                                                            'Too many failed login attempts. Please try again after {time}.'
-                                                                                        );
-                                                                                    } else {
-                                                                                        showError(result.message || 'Login failed. Please try again.');
-
-                                                                                        if (result.errorCode === 'subscription_expired' && result.canRenewSubscription && result.renewalToken) {
-                                                                                            showRenewSubscriptionCta(result.renewalToken);
-                                                                                        } else {
-                                                                                            hideRenewSubscriptionCta();
-                                                                                        }
-
-                                                                                        setPrimaryButtonState(false, '');
-                                                                                    }
+                                                                                    handleAuthFailure(result);
                                                                                 } catch (error) {
                                                                                     resetTurnstile(loginTurnstileWidgetId);
                                                                                     console.error('Login error:', error);

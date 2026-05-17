@@ -382,14 +382,16 @@
     transform: translateY(-1px);
 }
 
-.btn-login:disabled {
+.btn-login:disabled,
+.btn-login.is-locked {
     background: #9ca3af;
     cursor: not-allowed;
     transform: none;
     opacity: 0.7;
 }
 
-.btn-login:disabled:hover {
+.btn-login:disabled:hover,
+.btn-login.is-locked:hover {
     background: #9ca3af;
     transform: none;
 }
