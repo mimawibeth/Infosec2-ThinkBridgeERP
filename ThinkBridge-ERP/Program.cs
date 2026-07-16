@@ -35,7 +35,7 @@ if (string.IsNullOrWhiteSpace(defaultConnectionString))
 {
     if (builder.Environment.IsDevelopment())
     {
-        defaultConnectionString = "Server=(localdb)\\MSSQLLocalDB;Database=ThinkBridgeERP;Trusted_Connection=True;MultipleActiveResultSets=true;TrustServerCertificate=True";
+        defaultConnectionString = "Server=db41842.databaseasp.net; Database=db41842; User Id=db41842; Password=D@p5g8%W_Z7z; Encrypt=False; MultipleActiveResultSets=True;";
     }
     else
     {
@@ -83,7 +83,7 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         options.ExpireTimeSpan = TimeSpan.FromMinutes(20);
         options.SlidingExpiration = true;
         options.Cookie.HttpOnly = true;
-        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
         options.Cookie.SameSite = SameSiteMode.Lax;
         options.Cookie.Name = "ThinkBridge.Auth";
         options.Cookie.IsEssential = true;
@@ -178,6 +178,17 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+// Security headers
+app.Use(async (context, next) =>
+{
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    context.Response.Headers["X-Frame-Options"] = "DENY";
+    context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    context.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
+    await next();
+});
+
 app.UseStaticFiles();
 
 app.UseRouting();

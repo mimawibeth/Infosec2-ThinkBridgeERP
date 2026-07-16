@@ -216,7 +216,7 @@ public class KnowledgeBaseService : IKnowledgeBaseService
                 return new CreateArticleResult { Success = false, ErrorMessage = "Category not found." };
 
             var normalizedReferences = NormalizeReferences(request.References);
-            var requiresCitation = !request.SaveAsDraft && LooksExternallySourced(request.Title, request.Description, request.Content);
+            var requiresCitation = !request.SaveAsDraft;
             var referencesValidationError = ValidateReferences(normalizedReferences, requiresCitation);
             if (!string.IsNullOrWhiteSpace(referencesValidationError))
                 return new CreateArticleResult { Success = false, ErrorMessage = referencesValidationError };
@@ -396,7 +396,7 @@ public class KnowledgeBaseService : IKnowledgeBaseService
             var effectiveContent = !string.IsNullOrWhiteSpace(request.Content) ? request.Content : currentContent;
             var isPublishingOrSubmitting = (request.SubmitForApproval == true && userRole == "ProjectManager")
                 || (userRole == "CompanyAdmin" && doc.ApprovalStatus == "Draft");
-            var requiresCitation = isPublishingOrSubmitting && LooksExternallySourced(effectiveTitle, effectiveDescription, effectiveContent);
+            var requiresCitation = isPublishingOrSubmitting;
             var normalizedReferences = request.References != null ? NormalizeReferences(request.References) : null;
 
             if (normalizedReferences != null)
@@ -1068,39 +1068,6 @@ public class KnowledgeBaseService : IKnowledgeBaseService
         }
 
         return null;
-    }
-
-    private static bool LooksExternallySourced(string? title, string? description, string? content)
-    {
-        var combined = string.Join(" ", new[] { title, description, content })
-            .ToLowerInvariant();
-
-        if (string.IsNullOrWhiteSpace(combined))
-        {
-            return false;
-        }
-
-        if (combined.Contains("http://") || combined.Contains("https://") || combined.Contains("www."))
-        {
-            return true;
-        }
-
-        var indicators = new[]
-        {
-            "according to",
-            "study",
-            "research",
-            "journal",
-            "guideline",
-            "whitepaper",
-            "report",
-            "who",
-            "cdc",
-            "iso",
-            "nist"
-        };
-
-        return indicators.Any(combined.Contains);
     }
 
     private async System.Threading.Tasks.Task NotifyAdminsOfPendingArticle(int companyId, int authorUserId, string articleTitle)

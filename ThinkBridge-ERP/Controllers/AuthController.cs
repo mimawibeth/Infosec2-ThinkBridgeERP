@@ -914,16 +914,16 @@ public class AuthController : Controller
 
     private async Task<bool> VerifyTurnstileAsync(string? captchaToken)
     {
-        if (string.IsNullOrWhiteSpace(captchaToken))
-        {
-            _logger.LogWarning("Turnstile token is missing.");
-            return false;
-        }
-
         var secretKey = _configuration["Turnstile:SecretKey"];
         if (string.IsNullOrWhiteSpace(secretKey))
         {
-            _logger.LogError("Turnstile secret key is not configured.");
+            _logger.LogWarning("Turnstile secret key is not configured. Skipping CAPTCHA verification.");
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(captchaToken))
+        {
+            _logger.LogWarning("Turnstile token is missing.");
             return false;
         }
 

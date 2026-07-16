@@ -922,7 +922,7 @@
                                                                                 }
 
                                                                                 const captchaToken = getTurnstileToken('login-turnstile');
-                                                                                if (!captchaToken) {
+                                                                                if (!captchaToken && turnstileSiteKey) {
                                                                                     showError('Please complete the security verification.');
                                                                                     return;
                                                                                 }
@@ -1010,7 +1010,7 @@
                                                                                 }
 
                                                                                 const forgotCaptchaToken = getTurnstileToken('forgot-turnstile');
-                                                                                if (!forgotCaptchaToken) {
+                                                                                if (!forgotCaptchaToken && turnstileSiteKey) {
                                                                                     errorText.textContent = 'Please complete the security verification.';
                                                                                     errorDiv.style.display = 'block';
                                                                                     return;

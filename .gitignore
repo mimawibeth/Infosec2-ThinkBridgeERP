@@ -50,6 +50,16 @@ ehthumbs.db
 Desktop.ini
 
 # =========================
+# SonarQube
+# =========================
+.scannerwork/
+
+# =========================
+# Publish Profiles
+# =========================
+**/Properties/PublishProfiles/*.pubxml
+
+# =========================
 # Logs
 # =========================
 *.log

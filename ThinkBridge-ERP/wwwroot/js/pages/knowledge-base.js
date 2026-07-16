@@ -579,6 +579,13 @@
         if (!title) { showToast('Article title is required', 'error'); return; }
         if (!folderId) { showToast('Please select a category', 'error'); return; }
         if (!content) { showToast('Article content is required', 'error'); return; }
+        if (!asDraft) {
+            const validRefs = references.filter(r => r.title && r.url);
+            if (validRefs.length === 0) {
+                showToast('At least one reference with a title and URL is required when submitting for approval.', 'error');
+                return;
+            }
+        }
 
         try {
             let result;
@@ -647,12 +654,12 @@
         row.innerHTML = `
             <div class="reference-row-grid">
                 <div class="form-group">
-                    <label>Source Title</label>
-                    <input type="text" class="form-input ref-title" maxlength="300" placeholder="Article, guideline, or study title" value="${escapeHtml(reference?.title || '')}" />
+                    <label>Source Title <span class="required">*</span></label>
+                    <input type="text" class="form-input ref-title" maxlength="300" placeholder="Article, guideline, or study title" required value="${escapeHtml(reference?.title || '')}" />
                 </div>
                 <div class="form-group">
-                    <label>URL</label>
-                    <input type="url" class="form-input ref-url" maxlength="2048" placeholder="https://example.com/source" value="${escapeHtml(reference?.url || '')}" />
+                    <label>URL <span class="required">*</span></label>
+                    <input type="url" class="form-input ref-url" maxlength="2048" placeholder="https://example.com/source" required value="${escapeHtml(reference?.url || '')}" />
                 </div>
             </div>
             <div class="reference-row-grid reference-row-grid-meta">

@@ -45,8 +45,11 @@ public class ArticleFilterRequest
 
 public class CreateArticleRequest
 {
+    [System.ComponentModel.DataAnnotations.Required, System.ComponentModel.DataAnnotations.StringLength(200)]
     public string Title { get; set; } = string.Empty;
+    [System.ComponentModel.DataAnnotations.StringLength(2000)]
     public string? Description { get; set; }
+    [System.ComponentModel.DataAnnotations.Required, System.ComponentModel.DataAnnotations.MaxLength(200000)]
     public string Content { get; set; } = string.Empty;
     public int FolderId { get; set; }
     public int? ProjectId { get; set; }

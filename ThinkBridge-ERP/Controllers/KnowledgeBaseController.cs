@@ -8,6 +8,7 @@ namespace ThinkBridge_ERP.Controllers;
 [ApiController]
 [Route("api/knowledgebase")]
 [Authorize(Policy = "TeamMemberOnly")]
+[RequestSizeLimit(250_000)]
 public class KnowledgeBaseController : ControllerBase
 {
     private readonly IKnowledgeBaseService _kbService;
@@ -121,6 +122,14 @@ public class KnowledgeBaseController : ControllerBase
 
         if (request.FolderId <= 0)
             return BadRequest(new { success = false, message = "Category is required." });
+
+        if (!request.SaveAsDraft)
+        {
+            var validRefs = request.References?.Where(r =>
+                !string.IsNullOrWhiteSpace(r.Title) && !string.IsNullOrWhiteSpace(r.Url)).ToList();
+            if (validRefs == null || validRefs.Count == 0)
+                return BadRequest(new { success = false, message = "At least one reference with a title and URL is required before submitting." });
+        }
 
         var result = await _kbService.CreateArticleAsync(companyId, userId, role, request);
         if (!result.Success)

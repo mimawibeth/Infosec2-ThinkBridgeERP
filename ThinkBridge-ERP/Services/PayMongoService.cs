@@ -198,10 +198,16 @@ public class PayMongoService : IPayMongoService
 
     private string? GetPayMongoSecretKey()
     {
-        return _config["PayMongo:SecretKey"]
-            ?? _config["PAYMONGO_SECRET_KEY"]
-            ?? _config["PAYMONGO_SECRETKEY"]
-            ?? _config["PAYMONGO_SECRET"];
+        return GetConfigValue("PayMongo:SecretKey")
+            ?? GetConfigValue("PAYMONGO_SECRET_KEY")
+            ?? GetConfigValue("PAYMONGO_SECRETKEY")
+            ?? GetConfigValue("PAYMONGO_SECRET");
+
+        string? GetConfigValue(string key)
+        {
+            var value = _config[key];
+            return string.IsNullOrWhiteSpace(value) ? null : value;
+        }
     }
 
     private static string AppendQuery(string url, string key, string value)
@@ -218,6 +224,25 @@ public class PayMongoService : IPayMongoService
     {
         try
         {
+            // Validate webhook signature
+            var webhookSecret = _config["PayMongo:WebhookSecret"];
+            if (!string.IsNullOrEmpty(webhookSecret))
+            {
+                if (!VerifyPayMongoSignature(payload, signatureHeader, webhookSecret))
+                {
+                    _logger.LogWarning("PayMongo webhook signature validation FAILED");
+                    return new PayMongoWebhookResult
+                    {
+                        Success = false,
+                        ErrorMessage = "Invalid webhook signature."
+                    };
+                }
+            }
+            else
+            {
+                _logger.LogWarning("PayMongo webhook secret not configured — skipping signature validation");
+            }
+
             // Parse the webhook payload
             using var doc = JsonDocument.Parse(payload);
             var data = doc.RootElement.GetProperty("data");
@@ -295,5 +320,41 @@ public class PayMongoService : IPayMongoService
                 ErrorMessage = "Failed to process webhook."
             };
         }
+    }
+
+    /// <summary>
+    /// Verifies the PayMongo webhook signature using HMAC-SHA256.
+    /// Header format: "t=timestamp,v1=hex_signature[,v1=extra_signature]"
+    /// </summary>
+    private static bool VerifyPayMongoSignature(string payload, string signatureHeader, string webhookSecret)
+    {
+        if (string.IsNullOrWhiteSpace(signatureHeader))
+            return false;
+
+        var keyBytes = Encoding.UTF8.GetBytes(webhookSecret);
+        var payloadBytes = Encoding.UTF8.GetBytes(payload);
+        byte[] computedHash;
+        using (var hmac = new System.Security.Cryptography.HMACSHA256(keyBytes))
+        {
+            computedHash = hmac.ComputeHash(payloadBytes);
+        }
+
+        var expectedSignature = Convert.ToHexString(computedHash).ToLowerInvariant();
+
+        // Parse the header: split by comma, extract v1= values
+        var parts = signatureHeader.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        foreach (var part in parts)
+        {
+            if (part.StartsWith("v1=", StringComparison.OrdinalIgnoreCase))
+            {
+                var providedSignature = part[3..].Trim();
+                if (string.Equals(expectedSignature, providedSignature, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 }
